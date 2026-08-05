@@ -69,6 +69,12 @@ Captured from the emulator at native 320×240.
 | ![now playing](docs/screenshots/now-playing.png) | ![truncation](docs/screenshots/long-title-truncation.png) |
 | Normal playback | A long title truncating |
 
+![offline](docs/screenshots/offline.png)
+
+The status screen. `CONNECTING` is accent-coloured with a clean core; faults
+are amber with a slash through it, so a normal wait and a real problem are
+distinguishable without relying on colour alone.
+
 ![accents](docs/screenshots/accented-text.png)
 
 Accented text, which is why the fonts are the Unicode `lgfxJapanGothicP` faces
@@ -96,6 +102,26 @@ two-second steps. Each of those now has a test named after the symptom.
 No golden images — they rot whenever a colour or font changes. The checks
 assert properties that should hold regardless ("no amber pixels remain in the
 info row after a toast expires").
+
+## The visualiser
+
+Decorative, and deliberately not pretending otherwise.
+
+The device never touches the audio stream, the Core Basic has no microphone,
+and Spotify's `/audio-features` and `/audio-analysis` both return **403** for
+this app tier — verified, not assumed. There is no tempo, energy or spectrum
+available at any price, so nothing here can react to the music.
+
+What it does instead is tie everything it *can* to real state:
+
+- **Colour is sampled from the album art**, so it changes with every record
+  (brightness-normalised, so a dark sleeve still yields a readable tint).
+- **Amplitude follows the real volume.**
+- **The bars settle flat when playback actually pauses.**
+
+The motion itself is layered sine waves. A fixed fake BPM was considered and
+rejected: a pulse locked to the wrong tempo reads as broken, while smooth
+motion reads as ambient.
 
 ## Live Spotify
 

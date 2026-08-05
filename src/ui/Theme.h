@@ -24,6 +24,15 @@ constexpr int COL_Y = MARGIN;
 constexpr int COL_W = SCREEN_W - COL_X - MARGIN;   // 120
 constexpr int COL_H = ART_SIZE;
 
+// Text sits at the top of the column rather than centred, freeing the space
+// beneath it for the visualiser.
+constexpr int TEXT_H = 100;
+
+constexpr int VIS_X = ART_X + ART_SIZE + MARGIN;      // 192
+constexpr int VIS_Y = MARGIN + TEXT_H + 6;            // 114
+constexpr int VIS_W = SCREEN_W - VIS_X - MARGIN;      // 120
+constexpr int VIS_H = 50;
+
 constexpr int STRIP_Y = ART_Y + ART_SIZE + MARGIN;  // 192
 constexpr int STRIP_H = SCREEN_H - STRIP_Y;         // 48
 

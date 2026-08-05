@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "../core/AppState.h"
+#include "Visualizer.h"
 
 // Renders the now-playing screen with dirty tracking.
 //
@@ -22,6 +23,7 @@ class NowPlayingScreen {
   void drawHeartRegion(const AppState &st, uint32_t now_ms);
   void drawGlyphRegion(const AppState &st, uint32_t now_ms);
   void drawArtRegion(const AppState &st);
+  Visualizer vis_;
   void drawTextColumn(const AppState &st);
   void drawColumnFoot(const AppState &st);
   void drawProgressBar(const AppState &st);

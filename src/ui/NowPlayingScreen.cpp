@@ -124,30 +124,32 @@ void drawGlyphMorph(M5Canvas *cv, float cx, float cy, float playness,
 
 void NowPlayingScreen::drawArtRegion(const AppState &st) {
   using namespace theme;
-  if (!drawArt(st.pb.art_path, ART_X, ART_Y, ART_SIZE)) {
+  if (drawArt(st.pb.art_path, ART_X, ART_Y, ART_SIZE)) {
+    // Tie the visualiser to whatever is actually playing. Sampled from the
+    // panel after the decode, so it works for any image the decoder accepted.
+    vis_.setTint(sampleArtTint(ART_X, ART_Y, ART_SIZE, pal.accent));
+  } else {
     // Missing or undecodable artwork must degrade, never blank the device.
     M5.Display.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE, pal.bar_bg);
     M5.Display.setFont(theme::fontSmall());
     M5.Display.setTextColor(pal.dim);
     M5.Display.setCursor(ART_X + 6, ART_Y + ART_SIZE / 2 - 4);
     M5.Display.print("no artwork");
+    vis_.setTint(pal.accent);
   }
 }
 
 void NowPlayingScreen::drawTextColumn(const AppState &st) {
   using namespace theme;
 
-  // Reserve the foot for heart/volume so a three-line title cannot collide.
-  constexpr int FOOT_H = 14;
   constexpr int TITLE_ARTIST_GAP = 6;
 
-  const int avail_h = COL_H - FOOT_H;
-  M5.Display.fillRect(COL_X, COL_Y, COL_W, avail_h, pal.bg);
+  // Top-aligned now, not centred: the space below belongs to the visualiser,
+  // so the old vertical centring would push the text down into it.
+  M5.Display.fillRect(COL_X, COL_Y, COL_W, TEXT_H, pal.bg);
 
-  // Wrap first, then centre: short titles otherwise sit against the top with a
-  // large void beneath them, which reads as a rendering bug rather than a
-  // layout. Line spacing comes from the font itself so changing face or size
-  // does not silently break the vertical maths.
+  // Line spacing comes from the font itself so changing face or size does not
+  // silently break the vertical maths.
   M5.Display.setFont(fontTitle());
   const int title_lead = M5.Display.fontHeight();
   char lines[TITLE_LINES][MAX_LINE];
@@ -158,10 +160,7 @@ void NowPlayingScreen::drawTextColumn(const AppState &st) {
   char alines[2][MAX_LINE];
   const int an = wrapText(st.pb.artist, COL_W, alines, 2);
 
-  const int content_h =
-      (n * title_lead) + TITLE_ARTIST_GAP + (an * artist_lead);
-  int y = COL_Y + (avail_h - content_h) / 2;
-  if (y < COL_Y) y = COL_Y;
+  int y = COL_Y;
 
   M5.Display.setFont(fontTitle());
   M5.Display.setTextColor(pal.text);
@@ -413,6 +412,13 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
   } else if (!toast_active && progress_sec != last_progress_sec_) {
     drawTimeRow(st, /*clear_first=*/false);
   }
+
+  // Runs every frame: it is continuously animated, and it is the one element
+  // whose whole job is to look alive.
+  if (force_) {
+    vis_.invalidate();
+  }
+  vis_.render(st.pb.is_playing, st.pb.volume_pct, now_ms);
 
   if (!force_ && st.pb.is_playing != last_playing_) {
     glyph_anim_active_ = true;

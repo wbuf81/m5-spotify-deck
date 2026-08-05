@@ -29,6 +29,8 @@ ROW = (0, 206, 320, 34)
 LEFT_TIME = (8, 208, 46, 18)
 RIGHT_TIME = (250, 208, 62, 18)
 GLYPH = (151, 209, 18, 16)
+VIS = (192, 114, 120, 50)
+TEXT_TOP = (192, 8, 120, 26)
 # Beacon sprite on the status screen: 96x96, centred, pushed at y=18.
 BEACON = (112, 18, 96, 96)
 
@@ -166,18 +168,67 @@ def artwork_renders_and_stays_in_its_box(tmp):
 
 @case
 def liking_turns_the_heart_green(tmp):
-    px = run({"EMU_FIRE": "like", "EMU_FIRE_MS": "400", "EMU_EXIT_MS": "1200"},
-             tmp("liked"))
+    """Fixture 1 starts unliked, so this is a real transition."""
+    px = run({"EMU_TRACK": "1", "EMU_FIRE": "like",
+              "EMU_FIRE_MS": "400", "EMU_EXIT_MS": "1200"}, tmp("liked"))
     g = count(px, HEART, is_green)
     assert g > 25, f"heart not filled after like ({g} green pixels)"
 
 
 @case
 def unliking_drains_the_heart(tmp):
-    px = run({"EMU_FIRE": "unlike", "EMU_FIRE_MS": "400", "EMU_EXIT_MS": "1200"},
-             tmp("unliked"))
+    """Fixture 0 starts liked, so this is a real transition."""
+    px = run({"EMU_TRACK": "0", "EMU_FIRE": "unlike",
+              "EMU_FIRE_MS": "400", "EMU_EXIT_MS": "1200"}, tmp("unliked"))
     g = count(px, HEART, is_green)
     assert g < 10, f"heart still green after unlike ({g} green pixels)"
+
+
+@case
+def visualiser_animates_while_playing(tmp):
+    """It is decorative, but it must actually move."""
+    a = run({"EMU_EXIT_MS": "1500"}, tmp("vis_a"))
+    b = run({"EMU_EXIT_MS": "2100"}, tmp("vis_b"))
+    assert region(a, VIS) != region(b, VIS), "visualiser is static while playing"
+
+
+@case
+def visualiser_settles_when_paused(tmp):
+    """Paused playback must calm the display rather than keep dancing.
+
+    Two samples taken well after the pause should be identical, since the bars
+    have decayed to their resting baseline.
+    """
+    common = {"EMU_FIRE": "playpause", "EMU_FIRE_MS": "300"}
+    a = run({**common, "EMU_EXIT_MS": "2600"}, tmp("pause_a"))
+    b = run({**common, "EMU_EXIT_MS": "3200"}, tmp("pause_b"))
+    assert region(a, VIS) == region(b, VIS), "visualiser still moving while paused"
+
+
+@case
+def visualiser_tint_follows_the_album(tmp):
+    """The colour is sampled from the artwork, so two covers must differ."""
+    blue = run({"EMU_TRACK": "0", "EMU_EXIT_MS": "1500"}, tmp("tint0"))
+    green = run({"EMU_TRACK": "3", "EMU_EXIT_MS": "1500"}, tmp("tint3"))
+
+    def dominant(px):
+        pixels = [p for p in region(px, VIS) if sum(p) > 120]
+        if not pixels:
+            return (0, 0, 0)
+        n = len(pixels)
+        return tuple(sum(c[i] for c in pixels) // n for i in range(3))
+
+    a, b = dominant(blue), dominant(green)
+    dist = sum(abs(a[i] - b[i]) for i in range(3))
+    assert dist > 60, f"visualiser tint barely differs between albums ({a} vs {b})"
+
+
+@case
+def song_title_starts_at_the_top_of_the_column(tmp):
+    """Text is top-aligned to leave room for the visualiser below it."""
+    px = run({"EMU_EXIT_MS": "900"}, tmp("toptext"))
+    lit = count(px, TEXT_TOP, is_bright)
+    assert lit > 40, f"title not at the top of the column ({lit} lit pixels)"
 
 
 @case

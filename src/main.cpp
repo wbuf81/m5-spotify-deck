@@ -319,17 +319,25 @@ void loop(void) {
     static const uint32_t t0 = now;
     if (!fired && (now - t0) >= at) {
       fired = true;
+      // Mirror a real button press exactly: optimistic local edit AND the
+      // command. Mutating only local state left the source disagreeing, so
+      // once the settle window expired its next poll undid the change.
       if (std::strcmp(what, "playpause") == 0) {
         mutateState([&](AppState &st) {
           st.pb.is_playing = !st.pb.is_playing;
           st.settle_playing_until_ms = now + SETTLE_MS;
         });
+        submit({CommandType::PlayPause, 0});
       } else {
+        const bool want = std::strcmp(what, "like") == 0;
+        bool changed = false;
         mutateState([&](AppState &st) {
-          st.pb.liked = (std::strcmp(what, "like") == 0);
+          changed = (st.pb.liked != want) || !st.pb.liked_known;
+          st.pb.liked = want;
           st.pb.liked_known = true;
           st.settle_liked_until_ms = now + SETTLE_MS;
         });
+        if (changed) submit({CommandType::ToggleLike, 0});
       }
     }
   }

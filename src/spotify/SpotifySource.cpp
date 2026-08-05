@@ -306,6 +306,10 @@ void SpotifySource::diagnose(AppState *out, uint32_t now_ms) {
       "/me/tracks?limit=1",
       "/me/albums?limit=1",
       "/me/library/contains?uris=spotify:track:4cOdK2wGLETKBW3PvgPWqT",
+      // Would a real, beat-synced visualiser be possible? These are the only
+      // sources of tempo/energy the Web API offers.
+      "/audio-features/4cOdK2wGLETKBW3PvgPWqT",
+      "/audio-analysis/4cOdK2wGLETKBW3PvgPWqT",
   };
   for (const char *p : probes) {
     HttpResponse r;
