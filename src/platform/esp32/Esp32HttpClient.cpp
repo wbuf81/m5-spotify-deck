@@ -1,27 +1,163 @@
-// Device HTTP — not yet implemented.
+// Device HTTP over TLS.
 //
-// Kept as a stub so the esp32 environment still compiles and links while the
-// shared Spotify code is developed against the emulator. The real version needs
-// WiFiClientSecure plus streaming: the /me/player response must be parsed from
-// the stream rather than buffered, and artwork must be spooled to SD, because
-// neither fits comfortably in heap on a board with no PSRAM.
+// Certificate validation is on. The alternative, setInsecure(), is one line
+// shorter and would send the Spotify client secret and refresh token over a
+// connection anyone on the network could impersonate. The ESP-IDF root CA
+// bundle ships with the Arduino core, so validation costs nothing to maintain —
+// no pinned certificates to rotate when Spotify's expire.
+//
+// The TLS client is reused across requests. A fresh handshake costs roughly a
+// second and tens of KB of heap; at a 2s poll interval, reconnecting every time
+// would leave the device permanently mid-handshake.
 
 #if !defined(EMULATOR)
 
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+
+#include <cstdio>
+
 #include "../../net/HttpClient.h"
+#include "../../net/NetLog.h"
+
+// Linked in by the Arduino core when the certificate bundle is enabled.
+extern const uint8_t rootca_crt_bundle_start[] asm("_binary_x509_crt_bundle_start");
+
+namespace {
+
+WiFiClientSecure &tlsClient() {
+  static WiFiClientSecure *c = nullptr;
+  if (!c) {
+    c = new WiFiClientSecure();
+    c->setCACertBundle(rootca_crt_bundle_start);
+    // Spotify answers well inside this; the ceiling exists so a black-holed
+    // connection cannot wedge the net task indefinitely.
+    c->setTimeout(15);
+  }
+  return *c;
+}
+
+}  // namespace
 
 namespace http {
 
-bool request(const char *, const std::string &, const std::vector<std::string> &,
-             const std::string &, HttpResponse *out) {
-  if (out) {
-    out->status = 0;
-    out->body.clear();
+bool request(const char *method, const std::string &url,
+             const std::vector<std::string> &headers, const std::string &body,
+             HttpResponse *out) {
+  out->body.clear();
+  out->status = 0;
+  out->retry_after_s = 0;
+
+  HTTPClient http;
+  http.setReuse(true);
+  http.setConnectTimeout(10000);
+  http.setTimeout(15000);
+  if (!http.begin(tlsClient(), url.c_str())) {
+    NETLOG("http.begin failed for %s", url.c_str());
+    return false;
   }
-  return false;
+
+  for (const auto &h : headers) {
+    const size_t colon = h.find(':');
+    if (colon == std::string::npos) continue;
+    std::string name = h.substr(0, colon);
+    std::string value = h.substr(colon + 1);
+    while (!value.empty() && value.front() == ' ') value.erase(value.begin());
+    http.addHeader(name.c_str(), value.c_str());
+  }
+
+  // Needed so a 429 can be honoured rather than guessed at.
+  const char *collect[] = {"Retry-After"};
+  http.collectHeaders(collect, 1);
+
+  int code;
+  if (body.empty()) {
+    code = http.sendRequest(method);
+  } else {
+    code = http.sendRequest(method, reinterpret_cast<uint8_t *>(
+                                        const_cast<char *>(body.data())),
+                            body.size());
+  }
+
+  if (code < 0) {
+    NETLOG("%s %s failed: %s", method, url.c_str(),
+           HTTPClient::errorToString(code).c_str());
+    http.end();
+    return false;
+  }
+
+  out->status = code;
+  if (http.hasHeader("Retry-After")) {
+    out->retry_after_s = http.header("Retry-After").toInt();
+  }
+
+  // Responses here are small — /me/player measured 3.8KB — so buffering is
+  // safe. Anything large enough to matter is artwork, which streams to SD via
+  // downloadToFile instead.
+  const int len = http.getSize();
+  if (len > 0 && len < 64 * 1024) out->body.reserve(len);
+  out->body = std::string(http.getString().c_str());
+
+  http.end();
+  return true;
 }
 
-bool downloadToFile(const std::string &, const std::string &) { return false; }
+bool downloadToFile(const std::string &url, const std::string &path) {
+  HTTPClient http;
+  http.setReuse(false);  // the CDN is a different host to the API
+  http.setConnectTimeout(10000);
+  http.setTimeout(20000);
+  if (!http.begin(tlsClient(), url.c_str())) return false;
+
+  const int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    NETLOG("artwork GET -> %d", code);
+    http.end();
+    return false;
+  }
+
+  const std::string tmp = path + ".part";
+  FILE *f = std::fopen(tmp.c_str(), "wb");
+  if (!f) {
+    NETLOG("cannot open %s for write", tmp.c_str());
+    http.end();
+    return false;
+  }
+
+  // Streamed in small chunks: a 640px cover is tens of KB and must never sit
+  // in heap in one piece on a board with no PSRAM.
+  WiFiClient *stream = http.getStreamPtr();
+  uint8_t buf[1024];
+  int remaining = http.getSize();
+  bool ok = true;
+
+  while (http.connected() && (remaining > 0 || remaining == -1)) {
+    const size_t avail = stream->available();
+    if (avail == 0) {
+      delay(1);
+      continue;
+    }
+    const int n = stream->readBytes(buf, avail > sizeof(buf) ? sizeof(buf) : avail);
+    if (n <= 0) break;
+    if (std::fwrite(buf, 1, n, f) != static_cast<size_t>(n)) {
+      ok = false;
+      break;
+    }
+    if (remaining > 0) remaining -= n;
+  }
+
+  std::fclose(f);
+  http.end();
+
+  // Promote only on success, so a truncated download never becomes a cache
+  // entry that fails to decode later.
+  if (ok && remaining <= 0) {
+    std::remove(path.c_str());
+    return std::rename(tmp.c_str(), path.c_str()) == 0;
+  }
+  std::remove(tmp.c_str());
+  return false;
+}
 
 }  // namespace http
 

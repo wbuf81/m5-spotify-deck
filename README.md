@@ -167,12 +167,45 @@ working entirely.
 ## Building for hardware
 
 ```sh
-pio run -e esp32 -t upload
+pio run -e esp32 -t upload && pio device monitor
 ```
 
-Not yet functional: the device build still needs `SpotifySource` (real Web API),
-`WifiLink`, `SpotifyAuth`, the SD artwork cache, and `src/config/secrets.h`.
-See the spec's build order.
+Requires `src/config/secrets.h` with WiFi credentials filled in (the OAuth
+helper prompts for them).
+
+**Untested on real hardware — no device yet.** It compiles, links and fits, but
+nothing below has been observed running on a board.
+
+```
+RAM    15.8%   51,812 / 327,680 static
+Flash  40.2%   1,263,409 / 3,145,728
+```
+
+The default partition table gives the app only 1.31MB, and WiFi + mbedTLS + the
+root CA bundle alone fill 96% of that, so `board_build.partitions = huge_app.csv`
+claims 3MB of the board's 16MB flash. OTA is not needed for a tethered device.
+
+TLS validates certificates against the ESP-IDF root CA bundle. `setInsecure()`
+would be one line shorter and would send the Spotify client secret and refresh
+token over a connection anyone on the network could impersonate.
+
+The net task is a real FreeRTOS task pinned to **core 0** with a 16KB stack —
+`std::thread` cannot pin a core or size a stack, and an mbedTLS handshake
+overflows the pthread default. Rendering stays on core 1 with the Arduino loop.
+
+Storage needed no porting: Arduino's SD library mounts at `/sd` through the
+ESP-IDF VFS, so the same `fopen`/`mkdir` code serves both platforms.
+
+### What to expect on first flash
+
+Unknown, honestly. The things most likely to bite, in order:
+
+1. **`sampleArtTint` reads pixels back off the panel.** ILI9342C readback over
+   SPI is slow and unreliable on some units. If the scene tint is wrong or the
+   device stalls on album changes, this is why; the fix is to sample during
+   JPEG decode instead.
+2. **JPEG decode speed and heap headroom.** Only measurable on the board.
+3. **SD card behaviour** at 25MHz — drop the clock if mounts are flaky.
 
 ## Layout
 

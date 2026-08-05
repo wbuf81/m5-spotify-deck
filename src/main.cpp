@@ -37,9 +37,10 @@
 #endif
 #endif
 
-#if defined(EMULATOR) && defined(HAVE_SECRETS)
+#if defined(HAVE_SECRETS)
 #include "net/NetLog.h"
 #include "net/NetWorker.h"
+#include "platform/esp32/Esp32Storage.h"
 #define CAN_GO_LIVE 1
 #endif
 
@@ -200,14 +201,22 @@ void setup(void) {
   g_not_playing_since_ms = now;
 
 #if defined(CAN_GO_LIVE)
+#if defined(EMULATOR)
   const bool force_fake = std::getenv("EMU_FAKE") != nullptr;
+  const char *cache_dir = ".cache/art";
+#else
+  const bool force_fake = false;
+  // Arduino's SD library mounts at /sd through the ESP-IDF VFS, so the same
+  // POSIX file code serves both platforms.
+  mountStorage();
+  const char *cache_dir = "/sd/art";
+#endif
   if (!force_fake) {
     g_live = true;
     g_net = new NetWorker(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
                           SPOTIFY_REFRESH_TOKEN);
-    g_net->start(".cache/art");
+    g_net->start(cache_dir, WIFI_SSID, WIFI_PASSWORD);
     NETLOG("NetWorker started");
-    std::fprintf(stderr, "[src] live Spotify\n");
   }
 #endif
 

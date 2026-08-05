@@ -1,24 +1,34 @@
 #pragma once
 
-// Runs SpotifySource off the UI thread.
+// Runs WiFi association and SpotifySource off the UI thread.
 //
-// This is the emulator's stand-in for the design's core-0 net task. A Spotify
-// call takes 200-500ms and a token refresh longer; sharing a thread with
-// rendering would freeze the buttons every time one happened.
+// This is the design's core-0 net task. A Spotify call takes 200-500ms and a
+// TLS handshake longer; sharing a thread with rendering would freeze the
+// buttons every time one happened.
 //
-// Ownership: the net thread never touches shared state while doing I/O. It
-// snapshots under lock, works on its own copy, then merges under lock.
+// On the device it is a real FreeRTOS task rather than std::thread, for two
+// reasons std::thread cannot provide: it must be pinned to core 0 so it never
+// competes with rendering on core 1, and it needs a much larger stack than the
+// pthread default because an mbedTLS handshake is stack-hungry.
+//
+// Ownership rule on both platforms: the net task never holds the lock while
+// doing I/O. It snapshots under lock, works on its own copy, then merges.
 
-#if defined(EMULATOR)
-
-#include <atomic>
 #include <mutex>
 #include <string>
-#include <thread>
 
 #include "../core/AppState.h"
 #include "../core/CommandQueue.h"
 #include "../spotify/SpotifySource.h"
+#include "WifiLink.h"
+
+#if defined(EMULATOR)
+#include <atomic>
+#include <thread>
+#else
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#endif
 
 class NetWorker {
  public:
@@ -26,17 +36,18 @@ class NetWorker {
             const char *refresh_token);
   ~NetWorker();
 
-  void start(const std::string &cache_dir);
+  void start(const std::string &cache_dir, const char *wifi_ssid,
+             const char *wifi_password);
   void stop();
 
-  // UI thread: enqueue a command for the net thread to execute.
+  // UI side: enqueue a command for the net task to execute.
   void submit(const Command &c);
 
-  // UI thread: copy the shared state out for rendering.
+  // UI side: copy the shared state out for rendering.
   AppState snapshot();
 
-  // UI thread: apply a locally-optimistic edit under the same lock the net
-  // thread merges with, so the two cannot interleave mid-update.
+  // UI side: apply a locally-optimistic edit under the same lock the net task
+  // merges with, so the two cannot interleave mid-update.
   template <typename Fn>
   void mutate(Fn fn) {
     std::lock_guard<std::mutex> lk(mtx_);
@@ -45,17 +56,24 @@ class NetWorker {
 
  private:
   void run();
-  void merge(const AppState &from, bool polled, uint32_t now_ms);
 
   SpotifySource source_;
+  WifiLink wifi_;
   std::string cache_dir_;
+  const char *ssid_ = nullptr;
+  const char *password_ = nullptr;
+  bool source_started_ = false;
 
   std::mutex mtx_;
   AppState state_;
   CommandQueue<> cmds_;
 
+#if defined(EMULATOR)
   std::thread thread_;
   std::atomic<bool> running_{false};
+#else
+  static void taskEntry(void *self);
+  TaskHandle_t task_ = nullptr;
+  volatile bool running_ = false;
+#endif
 };
-
-#endif  // EMULATOR
