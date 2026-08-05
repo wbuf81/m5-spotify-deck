@@ -366,6 +366,62 @@ parameterized by `ART_SIZE`:
 3. **Mac pre-scales.** Abandons standalone operation and is a last resort, taken
    only if on-device decode fails entirely.
 
+## Emulator
+
+Added after the initial design, at the user's request, to judge the UI before
+buying hardware. It is **not a mockup**: M5GFX supports desktop builds via SDL2
+(`lgfx::Panel_sdl`), so the same firmware source compiles for macOS and renders at
+the real 320×240. M5Unified's Display and Button abstractions work identically on
+both targets.
+
+`platformio.ini` defines two environments, `native` and `esp32`, sharing one
+`src/` tree. Platform-specific code lives under `src/platform/{native,esp32}/` and
+is selected by `build_src_filter`.
+
+The emulator reproduces the parts of the real system most likely to produce bugs
+rather than being a convenient fiction. `FakeSource` owns a private "remote"
+playback state that the UI cannot write; commands take effect only after a
+simulated 250ms round trip; state publishes on a 2-second poll interval; and the
+settle windows are honoured. This makes the optimistic-UI behaviour and progress
+extrapolation observable instead of theoretical.
+
+Framebuffer capture (`src/platform/native/FrameDump.cpp`) writes a 24-bit BMP via
+`readRect`, with `EMU_DUMP` and `EMU_EXIT_AFTER` making a run a deterministic
+one-shot. This exists because screen-scraping the SDL window means fighting window
+placement and Retina scaling; reading the framebuffer gives an exact 320×240
+image, which also makes visual regression checks possible later.
+
+### What the emulator can and cannot prove
+
+It resolves the **correctness** half of the fractional-scaling risk: `drawJpg`
+with `scale = 0.0f` auto-fits a 300px cover into the 176px region correctly, so no
+source-dimension hardcoding and no power-of-two constraint.
+
+It cannot resolve the **performance and memory** half. The host has effectively
+unlimited RAM and no SPI bus. Decode speed, heap headroom without PSRAM, and real
+network latency still require hardware, so the step 0 spike remains necessary.
+
+### Findings that changed the design
+
+- **`readRect` returns byte-swapped RGB565** (writing `TFT_RED` `0xF800` reads
+  back `0x00F8`), because LovyanGFX stores 16-bit colour in panel bus order.
+  Affects framebuffer capture only, not drawing.
+- **Fonts must cover Latin-1.** The Adafruit GFX FreeSans faces are ASCII-only
+  and rendered "Björk" as "Bj□rk". Real libraries contain Björk, Sigur Rós,
+  Beyoncé, Céline Dion, Mötley Crüe. Resolved by using the `lgfxJapanGothicP`
+  faces, which despite the name carry the full Latin range plus CJK and are
+  proportional. Consequence: **no bold variant exists**, so typographic hierarchy
+  comes from size (20px title, 16px artist) rather than weight.
+- **Line spacing is derived from `fontHeight()`**, not hardcoded, so changing face
+  or size cannot silently break the vertical centring.
+- **The text column needs vertical centring.** Top-aligned short titles left
+  roughly 150px of dead space beneath the artist, which reads as a rendering bug.
+- **The play/pause glyph is a status indicator, not a button**, so playing shows
+  ▶. The initial implementation had the inverse (button convention), which is
+  wrong for a display driven by separate physical buttons.
+- **RGB565 banding is visible** on smooth-gradient artwork. Inherent to a 16-bit
+  panel; no mitigation planned.
+
 ## Testing
 
 The bug-prone parts of this system are pure logic and are tested on the Mac with

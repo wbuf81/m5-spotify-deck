@@ -4,3 +4,5 @@ src/config/secrets.h
 .DS_Store
 *.bin
 *.elf
+*.bmp
+emu-frame.*
