@@ -17,6 +17,11 @@ class StatusScreen {
   void invalidate() { force_ = true; }
   void render(const AppState &st, uint32_t now_ms);
 
+  // Frees the beacon sprite while this screen is hidden. At 96x96x2 it is the
+  // single largest buffer in the project, and it belongs to the screen you see
+  // least often.
+  void release();
+
   // True when this screen should be showing instead of now-playing.
   static bool shouldShow(const AppState &st);
 

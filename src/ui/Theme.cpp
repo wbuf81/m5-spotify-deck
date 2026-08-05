@@ -7,6 +7,12 @@ namespace theme {
 Palette pal{};
 
 namespace {
+float g_dim = 1.0f;
+}
+
+float dimFactor() { return g_dim; }
+
+namespace {
 
 // Base palette at full strength, as 24-bit values.
 constexpr uint32_t BASE_BG = 0x101012;
@@ -45,6 +51,7 @@ void applyBrightness(uint8_t brightness) {
 #else
   const float f = 1.0f;
 #endif
+  g_dim = f;
 
   pal.bg = scaled(BASE_BG, f);
   pal.strip = scaled(BASE_STRIP, f);

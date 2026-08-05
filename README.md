@@ -51,6 +51,8 @@ nothing playing.
 | `EMU_FIRE=<like\|unlike\|playpause>` | Fire a user action at a known time, to sample animations |
 | `EMU_FIRE_MS=<ms>` | When `EMU_FIRE` triggers (default 500) |
 | `EMU_LINK=<connecting\|offline\|autherror\|reauth\|notrack>` | Force a link state to inspect the status screen |
+| `EMU_SCENE=<0-3>` | Pin one ambient scene instead of rotating |
+| `EMU_DIM_AFTER_MS=<ms>` | Shorten the 30s dim timer, so dimming is testable |
 | `EMU_DUMP=<path>` | Write the framebuffer as a 24-bit BMP |
 | `EMU_EXIT_AFTER=<n>` | Quit after *n* frames. Note `loop()` runs as fast as SDL allows, so this is **not** a wall-clock proxy — prefer `EMU_EXIT_MS` when waiting on the network |
 

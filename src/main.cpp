@@ -56,7 +56,15 @@ constexpr uint32_t SETTLE_MS = 1500;
 constexpr uint32_t VOLUME_COALESCE_MS = 300;
 constexpr int VOLUME_STEP = 5;
 
-constexpr uint32_t DIM_AFTER_MS = 30000;
+uint32_t dimAfterMs() {
+#if defined(EMULATOR)
+  // Overridable so the visual suite can exercise dimming without a 30s test.
+  if (const char *v = std::getenv("EMU_DIM_AFTER_MS")) {
+    return static_cast<uint32_t>(std::atoi(v));
+  }
+#endif
+  return 30000;
+}
 constexpr uint32_t SLEEP_AFTER_IDLE_MS = 180000;
 
 AppState g_state;
@@ -172,7 +180,7 @@ void updateBrightness(uint32_t now_ms) {
       !g_state.pb.is_playing &&
       (now_ms - g_not_playing_since_ms) >= SLEEP_AFTER_IDLE_MS;
 
-  if ((now_ms - g_last_interaction_ms) < DIM_AFTER_MS) {
+  if ((now_ms - g_last_interaction_ms) < dimAfterMs()) {
     want = theme::BRIGHT_ACTIVE;
   } else if (idle_long) {
     want = theme::BRIGHT_OFF;
@@ -180,6 +188,15 @@ void updateBrightness(uint32_t now_ms) {
     want = theme::BRIGHT_IDLE;
   }
 
+#if defined(EMULATOR)
+  if (std::getenv("EMU_DIM_DEBUG")) {
+    static int n = 0;
+    if ((n++ % 600) == 0) {
+      std::fprintf(stderr, "[dim] now=%u since_touch=%u want=%d cur=%d\n", now_ms,
+                   now_ms - g_last_interaction_ms, (int)want, (int)g_brightness);
+    }
+  }
+#endif
   if (want != g_brightness) {
     g_brightness = want;
     theme::applyBrightness(want);
@@ -307,9 +324,16 @@ void loop(void) {
     const bool want_status = StatusScreen::shouldShow(g_state);
     if (want_status != g_showing_status) {
       g_showing_status = want_status;
-      // Switching screens leaves the whole panel stale.
+      // Switching screens leaves the whole panel stale. Also hand back the
+      // hidden screen's sprites: the two are mutually exclusive, so only one
+      // need hold buffers, which matters on a board with no PSRAM.
       g_status.invalidate();
       g_screen.invalidate();
+      if (want_status) {
+        g_screen.release();
+      } else {
+        g_status.release();
+      }
     }
     if (want_status) {
       g_status.render(g_state, now);

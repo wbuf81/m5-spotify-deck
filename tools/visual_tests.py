@@ -281,6 +281,33 @@ def song_title_starts_at_the_top_of_the_column(tmp):
     assert lit > 40, f"title not at the top of the column ({lit} lit pixels)"
 
 
+def _mean(px, box):
+    vals = [sum(p) / 3 for p in region(px, box)]
+    return sum(vals) / len(vals)
+
+
+@case
+def dimming_darkens_artwork_as_well_as_text(tmp):
+    """The backlight dims every pixel, so the emulator must too.
+
+    It previously scaled only the palette, leaving album art at full brightness
+    while the text dimmed around it — which misrepresents the device at exactly
+    the moment you are judging how it looks on a desk at night.
+    """
+    bright = run({"EMU_EXIT_MS": "1200"}, tmp("bright"))
+    dim = run({"EMU_DIM_AFTER_MS": "800", "EMU_EXIT_MS": "2400"}, tmp("dim"))
+
+    art_ratio = _mean(dim, ART) / max(1.0, _mean(bright, ART))
+    text_ratio = _mean(dim, (192, 8, 120, 60)) / max(1.0, _mean(bright, (192, 8, 120, 60)))
+
+    assert art_ratio < 0.6, f"artwork did not dim (ratio {art_ratio:.2f})"
+    assert text_ratio < 0.6, f"text did not dim (ratio {text_ratio:.2f})"
+    # They must dim together; art staying bright while text dims was the bug.
+    assert abs(art_ratio - text_ratio) < 0.25, (
+        f"artwork and text dim by different amounts "
+        f"({art_ratio:.2f} vs {text_ratio:.2f})")
+
+
 @case
 def offline_shows_the_status_screen(tmp):
     """Losing the link must show a real screen, not a corner dot."""

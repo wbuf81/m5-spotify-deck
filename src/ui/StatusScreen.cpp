@@ -43,13 +43,26 @@ bool StatusScreen::shouldShow(const AppState &st) {
   return st.link != LinkStatus::Online || !st.pb.has_track;
 }
 
+void StatusScreen::release() {
+  if (!beacon_) return;
+  beacon_->deleteSprite();
+  delete beacon_;
+  beacon_ = nullptr;
+}
+
 void StatusScreen::drawBeacon(const AppState &st, uint32_t now_ms) {
   using namespace theme;
 
   if (!beacon_) {
     beacon_ = new M5Canvas(&M5.Display);
     beacon_->setColorDepth(16);
-    beacon_->createSprite(BEACON, BEACON);
+    if (!beacon_->createSprite(BEACON, BEACON)) {
+      // Out of contiguous heap. The headline and detail text still render, so
+      // the user still learns what is wrong — they just lose the animation.
+      delete beacon_;
+      beacon_ = nullptr;
+      return;
+    }
   }
 
   const Copy c = copyFor(st);

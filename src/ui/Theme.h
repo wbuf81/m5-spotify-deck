@@ -83,4 +83,10 @@ const lgfx::IFont *fontSmall();
 // dimming is actually visible on screen.
 void applyBrightness(uint8_t brightness);
 
+// Current dim level as a 0..1 multiplier. Emulator-only concern: on hardware
+// the backlight dims every pixel including the artwork, but a desktop window
+// has no backlight, so anything not drawn from the palette has to be scaled by
+// hand or it stays misleadingly bright.
+float dimFactor();
+
 }  // namespace theme

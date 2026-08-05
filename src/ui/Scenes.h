@@ -46,6 +46,8 @@ class ScenePanel {
               uint32_t duration_ms, uint32_t now_ms);
 
   void invalidate() { force_ = true; }
+  // Frees the sprite while this screen is hidden.
+  void release();
   const char *currentName() const;
 
   static constexpr int SCENE_COUNT = 4;

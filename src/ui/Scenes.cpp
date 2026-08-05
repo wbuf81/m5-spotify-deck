@@ -275,16 +275,29 @@ PlanetScene g_planet;
 }  // namespace
 
 void ScenePanel::ensure() {
-  if (cv_) return;
-  cv_ = new M5Canvas(&M5.Display);
-  cv_->setColorDepth(16);
-  cv_->createSprite(theme::VIS_W, theme::VIS_H);
+  if (!cv_) {
+    cv_ = new M5Canvas(&M5.Display);
+    cv_->setColorDepth(16);
+    if (!cv_->createSprite(theme::VIS_W, theme::VIS_H)) {
+      // Out of contiguous heap: lose the scene rather than the device.
+      delete cv_;
+      cv_ = nullptr;
+    }
+  }
+  if (scenes_[0]) return;
 
   scenes_[0] = &g_synth;
   scenes_[1] = &g_stars;
   scenes_[2] = &g_city;
   scenes_[3] = &g_planet;
   for (auto *s : scenes_) s->reset(0x5eed);
+}
+
+void ScenePanel::release() {
+  if (!cv_) return;
+  cv_->deleteSprite();
+  delete cv_;
+  cv_ = nullptr;
 }
 
 void ScenePanel::setTint(uint16_t tint) {
@@ -353,6 +366,7 @@ void ScenePanel::render(bool playing, int volume_pct, uint32_t progress_ms,
   }
 #endif
 
+  if (!cv_) return;
   cv_->fillSprite(theme::pal.bg);
   scenes_[current_]->render(cv_, ctx);
   cv_->pushSprite(theme::VIS_X, theme::VIS_Y);

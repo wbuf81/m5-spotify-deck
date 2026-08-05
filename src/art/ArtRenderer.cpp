@@ -1,5 +1,7 @@
 #include "ArtRenderer.h"
 
+#include "../ui/Theme.h"
+
 #include <M5Unified.h>
 
 #include <cstdio>
@@ -56,6 +58,38 @@ bool decodeInto(LovyanGFX *dst, const char *path, int x, int y, int size) {
 
 bool drawArt(const char *path, int x, int y, int size) {
   if (!path || path[0] == '\0') return false;
+
+#if defined(EMULATOR)
+  // On hardware the backlight dims the artwork along with everything else. A
+  // desktop window has none, so without this the art stays at full brightness
+  // while the rest of the UI dims — which misrepresents what the device does at
+  // the exact moment you are trying to judge it. Cost is a 62KB scratch sprite,
+  // which is nothing on a host and is why this is emulator-only.
+  const float f = theme::dimFactor();
+  if (f < 0.99f) {
+    M5Canvas tmp(&M5.Display);
+    tmp.setColorDepth(16);
+    if (tmp.createSprite(size, size)) {
+      if (!decodeInto(&tmp, path, 0, 0, size)) {
+        tmp.deleteSprite();
+        return false;
+      }
+      for (int py = 0; py < size; ++py) {
+        for (int px = 0; px < size; ++px) {
+          const uint16_t c = tmp.readPixel(px, py);
+          const int r = static_cast<int>((((c >> 11) & 0x1F) << 3) * f);
+          const int g = static_cast<int>((((c >> 5) & 0x3F) << 2) * f);
+          const int b = static_cast<int>(((c & 0x1F) << 3) * f);
+          tmp.drawPixel(px, py, M5.Display.color565(r, g, b));
+        }
+      }
+      tmp.pushSprite(x, y);
+      tmp.deleteSprite();
+      return true;
+    }
+  }
+#endif
+
   return decodeInto(&M5.Display, path, x, y, size);
 }
 
