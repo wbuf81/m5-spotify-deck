@@ -42,9 +42,13 @@ nothing playing.
 
 | Variable | Effect |
 |---|---|
+| `EMU_FAKE=1` | Use offline fixtures instead of live Spotify |
 | `EMU_TRACK=<n>` | Start on fixture *n* (0–4) |
+| `EMU_EXIT_MS=<ms>` | Quit after wall-clock ms — use this when waiting on the network |
+| `SPOTIFY_DEBUG=1` | Log HTTP status codes and API errors (never tokens) |
+| `SPOTIFY_DIAG=1` | Probe several endpoints once and log their statuses |
 | `EMU_DUMP=<path>` | Write the framebuffer as a 24-bit BMP |
-| `EMU_EXIT_AFTER=<n>` | Quit after *n* frames — makes captures deterministic |
+| `EMU_EXIT_AFTER=<n>` | Quit after *n* frames. Note `loop()` runs as fast as SDL allows, so this is **not** a wall-clock proxy — prefer `EMU_EXIT_MS` when waiting on the network |
 
 ```sh
 # Capture a specific case as a PNG
@@ -65,6 +69,25 @@ Captured from the emulator at native 320×240.
 
 Accented text, which is why the fonts are the Unicode `lgfxJapanGothicP` faces
 rather than Adafruit's ASCII-only FreeSans.
+
+## Live Spotify
+
+With `src/config/secrets.h` present the emulator uses the real Web API; without
+it, offline fixtures. `EMU_FAKE=1` forces fixtures either way.
+
+```sh
+python3 tools/get_refresh_token.py    # in a REAL terminal, not an agent session
+```
+
+Networking runs on its own thread, mirroring the design's core-0 net task — a
+Spotify call takes 200-500ms and must never block rendering.
+
+**Development Mode apps must use the post-February-2026 library endpoints**
+(`/me/library`, `/me/library/contains`, addressed by Spotify URI). The old
+`/me/tracks` equivalents are deprecated and answer 403 with no explanation,
+which is indistinguishable from a scope problem. See the spec for the full
+diagnosis. Note also that the app owner needs active Premium or the app stops
+working entirely.
 
 ## Building for hardware
 

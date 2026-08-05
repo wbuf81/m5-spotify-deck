@@ -42,6 +42,7 @@ class SpotifySource {
   void pollPlayer(AppState *out, uint32_t now_ms);
   void refreshLiked(AppState *out, uint32_t now_ms);
   void diagnose(AppState *out, uint32_t now_ms);
+  void probeLibraryWrite(AppState *out, uint32_t now_ms);
 
   SpotifyAuth auth_;
   ArtCache art_;

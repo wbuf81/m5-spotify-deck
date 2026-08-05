@@ -422,6 +422,43 @@ network latency still require hardware, so the step 0 spike remains necessary.
 - **RGB565 banding is visible** on smooth-gradient artwork. Inherent to a 16-bit
   panel; no mitigation planned.
 
+## Spotify API: February 2026 Dev Mode changes
+
+Development Mode apps — which this is — were migrated off the entity-specific
+library endpoints. The deprecated ones still exist but answer **403 with a bare
+`{"error":{"status":403,"message":"Forbidden"}}`**, naming neither deprecation
+nor a missing scope, which makes this look exactly like a permissions problem
+when it is not.
+
+| Deprecated (403) | Current |
+|---|---|
+| `PUT` / `DELETE /me/tracks?ids=` | `PUT` / `DELETE /me/library?uris=` |
+| `GET /me/tracks/contains?ids=` | `GET /me/library/contains?uris=` |
+
+Identifiers are full Spotify URIs (`spotify:track:<id>`), not bare IDs. The
+response shape of `contains` is unchanged: a JSON array of booleans.
+
+`/me/player` endpoints are **not** affected, which is why playback control and
+polling worked throughout while every library operation failed.
+
+Diagnosis that ruled out the obvious explanation: `GET /me/tracks?limit=1`
+returned 200 on the very same `user-library-read` grant that `GET
+/me/tracks/contains` rejected with 403, so the scope was demonstrably present
+and usable. Verified end to end afterwards — `PUT /me/library` 200,
+`contains` `[true]`, `DELETE` 200, `contains` `[false]`.
+
+Two further Development Mode constraints worth recording, since they affect
+whether this project keeps working:
+
+- **The app owner must hold an active Spotify Premium subscription.** If it
+  lapses, the app stops working — not merely the control endpoints.
+- New apps are limited to **1 Client ID per developer and 5 users per app**.
+
+Because saved-state can be unavailable for reasons outside our control,
+`PlaybackState` carries `liked_known` alongside `liked`, and the UI draws no
+heart at all when it is false. A dim heart would assert "not liked", which is a
+claim we cannot make when the API declines to answer.
+
 ## Testing
 
 The bug-prone parts of this system are pure logic and are tested on the Mac with

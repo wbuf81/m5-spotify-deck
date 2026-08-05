@@ -158,7 +158,11 @@ void SpotifySource::runCommand(const Command &c, AppState *out,
     }
     case CommandType::ToggleLike: {
       if (out->pb.track_id[0] == '\0') return;
-      url = std::string(API) + "/me/tracks?ids=" + out->pb.track_id;
+      // Spotify's February 2026 Dev Mode changes replaced the per-type save
+      // endpoints with a generic /me/library taking Spotify URIs. The old
+      // PUT /me/tracks is deprecated and answers 403 with no explanation.
+      url = std::string(API) + "/me/library?uris=spotify:track:" +
+            out->pb.track_id;
       method = out->pb.liked ? "PUT" : "DELETE";
       break;
     }
@@ -267,21 +271,21 @@ void SpotifySource::refreshLiked(AppState *out, uint32_t now_ms) {
   if (last_liked_track_ == out->pb.track_id) return;
 
   HttpResponse resp;
-  const std::string url =
-      std::string(API) + "/me/tracks/contains?ids=" + out->pb.track_id;
+  const std::string url = std::string(API) +
+                          "/me/library/contains?uris=spotify:track:" +
+                          out->pb.track_id;
   if (!call("GET", url, "", &resp, out, now_ms)) return;
 
-  if (resp.status == 403) {
-    // Restricted for this app. Verified against /me/tracks, which uses the same
-    // user-library-read scope and returns 200, so this is endpoint-specific
-    // rather than a missing grant. Give up permanently instead of retrying at
-    // the poll rate.
-    NETLOG("saved-state unavailable: /me/tracks/contains is 403 for this app");
+  if (resp.status == 403 || resp.status == 404) {
+    // Give up permanently rather than retrying at the poll rate. Saved-state
+    // then stays unknown, which the UI renders as no heart at all.
+    NETLOG("saved-state unavailable: /me/library/contains -> %d", resp.status);
     liked_supported_ = false;
     out->pb.liked_known = false;
     return;
   }
   if (resp.status != 200) return;
+  NETLOG("library/contains body: %.120s", resp.body.c_str());
 
   JsonDocument doc;
   if (deserializeJson(doc, resp.body) != DeserializationError::Ok) return;
@@ -301,6 +305,7 @@ void SpotifySource::diagnose(AppState *out, uint32_t now_ms) {
       "/me/player/devices",
       "/me/tracks?limit=1",
       "/me/albums?limit=1",
+      "/me/library/contains?uris=spotify:track:4cOdK2wGLETKBW3PvgPWqT",
   };
   for (const char *p : probes) {
     HttpResponse r;
@@ -309,6 +314,46 @@ void SpotifySource::diagnose(AppState *out, uint32_t now_ms) {
              r.status >= 400 ? r.body.c_str() : "");
     } else {
       NETLOG("DIAG %-24s -> transport/auth failure", p);
+    }
+  }
+}
+
+// SPOTIFY_DIAG_WRITE=1: verify PUT/DELETE /me/library actually work.
+//
+// Only runs when the current track is NOT already saved, and reverts what it
+// does, so the user's library ends exactly as it started. If the track is
+// already saved it refuses, because then a revert would mean deleting
+// something the user actually wanted.
+void SpotifySource::probeLibraryWrite(AppState *out, uint32_t now_ms) {
+  if (out->pb.track_id[0] == '\0') return;
+  const std::string uri = std::string("spotify:track:") + out->pb.track_id;
+  const std::string contains = std::string(API) + "/me/library/contains?uris=" + uri;
+  const std::string lib = std::string(API) + "/me/library?uris=" + uri;
+
+  HttpResponse r;
+  if (!call("GET", contains, "", &r, out, now_ms) || r.status != 200) {
+    NETLOG("WRITETEST: cannot read saved-state, aborting");
+    return;
+  }
+  if (r.body.find("true") != std::string::npos) {
+    NETLOG("WRITETEST: track already saved — refusing, revert would delete it");
+    return;
+  }
+
+  if (!call("PUT", lib, "", &r, out, now_ms)) return;
+  NETLOG("WRITETEST: PUT  /me/library -> %d %.80s", r.status,
+         r.status >= 400 ? r.body.c_str() : "");
+  const bool put_ok = r.status >= 200 && r.status < 300;
+
+  if (put_ok) {
+    call("GET", contains, "", &r, out, now_ms);
+    NETLOG("WRITETEST: after PUT, contains = %.20s", r.body.c_str());
+
+    // Revert, so the library ends as it began.
+    if (call("DELETE", lib, "", &r, out, now_ms)) {
+      NETLOG("WRITETEST: DELETE /me/library -> %d (reverting)", r.status);
+      call("GET", contains, "", &r, out, now_ms);
+      NETLOG("WRITETEST: after revert, contains = %.20s", r.body.c_str());
     }
   }
 }
@@ -337,4 +382,12 @@ void SpotifySource::step(AppState *out, CommandQueue<> *cmds, uint32_t now_ms) {
   if (now_ms < next_poll_ms_) return;
   pollPlayer(out, now_ms);
   refreshLiked(out, now_ms);
+
+  if (std::getenv("SPOTIFY_DIAG_WRITE")) {
+    static bool done = false;
+    if (!done && out->pb.track_id[0] != '\0') {
+      done = true;
+      probeLibraryWrite(out, now_ms);
+    }
+  }
 }
