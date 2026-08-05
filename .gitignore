@@ -6,3 +6,4 @@ src/config/secrets.h
 *.elf
 *.bmp
 emu-frame.*
+.cache/

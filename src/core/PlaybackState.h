@@ -36,6 +36,12 @@ struct PlaybackState {
   int volume_pct = -1;
 
   bool liked = false;
+
+  // Whether `liked` means anything. Spotify's /me/tracks/contains is restricted
+  // for some apps and returns 403 even with user-library-read granted, in which
+  // case saved-state is genuinely unknowable and must not be drawn as "not
+  // liked" — that would be a confident lie.
+  bool liked_known = false;
 };
 
 inline void setStr(char *dst, size_t cap, const char *src) {

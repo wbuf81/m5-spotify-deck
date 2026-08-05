@@ -160,7 +160,12 @@ void NowPlayingScreen::drawColumnFoot(const AppState &st) {
   const int foot_y = COL_Y + COL_H - FOOT_H;
   M5.Display.fillRect(COL_X, foot_y, COL_W, FOOT_H, pal.bg);
 
-  drawHeart(COL_X, foot_y + 1, st.pb.liked ? pal.accent : pal.bar_bg);
+  // No heart at all when saved-state is unknown. A dim heart would read as
+  // "not liked", which is a claim we cannot make when the API refuses to tell
+  // us. Absence is the honest rendering.
+  if (st.pb.liked_known) {
+    drawHeart(COL_X, foot_y + 1, st.pb.liked ? pal.accent : pal.bar_bg);
+  }
 
   M5.Display.setFont(theme::fontSmall());
   M5.Display.setTextColor(pal.dim);
@@ -262,6 +267,7 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
     drawTextColumn(st);
   }
   if (force_ || track_changed || st.pb.liked != last_liked_ ||
+      st.pb.liked_known != last_liked_known_ ||
       st.pb.volume_pct != last_volume_) {
     drawColumnFoot(st);
   }
@@ -303,6 +309,7 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
   last_progress_sec_ = progress_sec;
   last_volume_ = st.pb.volume_pct;
   last_liked_ = st.pb.liked;
+  last_liked_known_ = st.pb.liked_known;
   last_playing_ = st.pb.is_playing;
   last_toast_active_ = toast_active;
   setStr(last_toast_, sizeof(last_toast_), st.toast);

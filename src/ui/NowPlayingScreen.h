@@ -30,6 +30,7 @@ class NowPlayingScreen {
   int last_progress_sec_ = -1;
   int last_volume_ = -2;
   bool last_liked_ = false;
+  bool last_liked_known_ = false;
   bool last_playing_ = false;
   bool last_toast_active_ = false;
   char last_toast_[64] = {};

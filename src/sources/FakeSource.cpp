@@ -48,6 +48,7 @@ void FakeSource::loadTrack(int index, uint32_t now_ms) {
   remote_.duration_ms = f.duration_ms;
   remote_.progress_ms = 0;
   remote_.liked = f.liked;
+  remote_.liked_known = true;
   last_advance_ms_ = now_ms;
 }
 
@@ -122,6 +123,7 @@ void FakeSource::publish(AppState *st, uint32_t now_ms) {
   if (now_ms >= st->settle_liked_until_ms) {
     st->pb.liked = remote_.liked;
   }
+  st->pb.liked_known = remote_.liked_known;
 
   last_publish_ms_ = now_ms;
 }
