@@ -285,13 +285,20 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
     if (toast_active) {
       drawToastRow(st);
     } else {
+      // The toast occupies the whole row, glyph included. Restoring the row
+      // means restoring both halves of it — redrawing only the times leaves the
+      // play glyph erased until the next play/pause, which looks like the
+      // button vanished.
       drawTimeRow(st, /*clear_first=*/true);
+      drawPlayGlyphBox(st);
     }
   } else if (!toast_active && progress_sec != last_progress_sec_) {
     drawTimeRow(st, /*clear_first=*/false);
   }
 
-  if (force_ || st.pb.is_playing != last_playing_) {
+  // Suppressed while a toast is up: the glyph would punch a hole through the
+  // message. The restore path above repaints it from current state anyway.
+  if (!toast_active && (force_ || st.pb.is_playing != last_playing_)) {
     drawPlayGlyphBox(st);
   }
 

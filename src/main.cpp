@@ -211,6 +211,14 @@ void setup(void) {
 #endif
   }
 
+#if defined(EMULATOR)
+  // EMU_TOAST=<text> raises a toast at startup so the toast layout, and the
+  // restore of the row underneath it, can be captured without a keypress.
+  if (const char *t = std::getenv("EMU_TOAST")) {
+    mutateState([&](AppState &st) { st.showToast(t, now); });
+  }
+#endif
+
   g_screen.invalidate();
 }
 

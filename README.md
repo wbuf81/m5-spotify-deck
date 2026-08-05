@@ -47,6 +47,7 @@ nothing playing.
 | `EMU_EXIT_MS=<ms>` | Quit after wall-clock ms — use this when waiting on the network |
 | `SPOTIFY_DEBUG=1` | Log HTTP status codes and API errors (never tokens) |
 | `SPOTIFY_DIAG=1` | Probe several endpoints once and log their statuses |
+| `EMU_TOAST=<text>` | Raise a toast at startup, to inspect the toast row without a keypress |
 | `EMU_DUMP=<path>` | Write the framebuffer as a 24-bit BMP |
 | `EMU_EXIT_AFTER=<n>` | Quit after *n* frames. Note `loop()` runs as fast as SDL allows, so this is **not** a wall-clock proxy — prefer `EMU_EXIT_MS` when waiting on the network |
 
