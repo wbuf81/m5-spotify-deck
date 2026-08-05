@@ -19,7 +19,10 @@ class NowPlayingScreen {
   void drawArtRegion(const AppState &st);
   void drawTextColumn(const AppState &st);
   void drawColumnFoot(const AppState &st);
-  void drawStrip(const AppState &st, uint32_t now_ms);
+  void drawProgressBar(const AppState &st);
+  void drawTimeRow(const AppState &st, bool clear_first);
+  void drawToastRow(const AppState &st);
+  void drawPlayGlyphBox(const AppState &st);
 
   bool force_ = true;
   char last_album_[ID_LEN] = {};
@@ -29,5 +32,6 @@ class NowPlayingScreen {
   bool last_liked_ = false;
   bool last_playing_ = false;
   bool last_toast_active_ = false;
+  char last_toast_[64] = {};
   LinkStatus last_link_ = LinkStatus::Booting;
 };

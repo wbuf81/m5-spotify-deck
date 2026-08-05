@@ -175,44 +175,69 @@ void NowPlayingScreen::drawColumnFoot(const AppState &st) {
   M5.Display.print(vol);
 }
 
-void NowPlayingScreen::drawStrip(const AppState &st, uint32_t now_ms) {
+// Nothing below clears a region it is about to overwrite. Panel_sdl (and a real
+// SPI panel) can present a frame mid-draw, so clear-then-redraw shows up as a
+// once-per-second blink of whatever sits in the cleared area.
+
+void NowPlayingScreen::drawProgressBar(const AppState &st) {
   using namespace theme;
-
-  M5.Display.fillRect(0, STRIP_Y, SCREEN_W, STRIP_H, pal.strip);
-
-  // progress bar
-  M5.Display.fillRect(BAR_X, BAR_Y, BAR_W, BAR_H, pal.bar_bg);
+  int played = 0;
   if (st.pb.duration_ms > 0) {
     uint32_t p = st.pb.progress_ms;
     if (p > st.pb.duration_ms) p = st.pb.duration_ms;
-    const int w = static_cast<int>((static_cast<uint64_t>(BAR_W) * p) /
-                                   st.pb.duration_ms);
-    M5.Display.fillRect(BAR_X, BAR_Y, w, BAR_H, pal.accent);
+    played = static_cast<int>((static_cast<uint64_t>(BAR_W) * p) /
+                              st.pb.duration_ms);
   }
+  // Both halves painted; the bar is fully covered without ever being blanked.
+  M5.Display.fillRect(BAR_X, BAR_Y, played, BAR_H, pal.accent);
+  M5.Display.fillRect(BAR_X + played, BAR_Y, BAR_W - played, BAR_H, pal.bar_bg);
+}
 
-  if (st.toastActive(now_ms)) {
-    M5.Display.setFont(theme::fontSmall());
-    M5.Display.setTextColor(pal.warn);
-    const int w = M5.Display.textWidth(st.toast);
-    M5.Display.setCursor((SCREEN_W - w) / 2, TIME_Y + 2);
-    M5.Display.print(st.toast);
-    return;
+void NowPlayingScreen::drawTimeRow(const AppState &st, bool clear_first) {
+  using namespace theme;
+  if (clear_first) {
+    M5.Display.fillRect(0, TIME_Y, SCREEN_W, 10, pal.strip);
   }
 
   M5.Display.setFont(theme::fontSmall());
-  M5.Display.setTextColor(pal.dim);
+  // Opaque text: every glyph cell repaints its own background, so the digits
+  // update in place with no intermediate blank.
+  M5.Display.setTextColor(pal.dim, pal.strip);
 
   char buf[16];
+  char padded[16];
+
+  // Fixed-width fields with a fixed-width font keep the pixel extents stable,
+  // so a shrinking string (10:00 -> 9:59) leaves no residue behind.
   formatTime(st.pb.progress_ms, buf, sizeof(buf));
+  std::snprintf(padded, sizeof(padded), "%-6s", buf);
   M5.Display.setCursor(BAR_X, TIME_Y + 2);
-  M5.Display.print(buf);
+  M5.Display.print(padded);
 
   formatTime(st.pb.duration_ms, buf, sizeof(buf));
-  const int tw = M5.Display.textWidth(buf);
-  M5.Display.setCursor(SCREEN_W - MARGIN - tw, TIME_Y + 2);
-  M5.Display.print(buf);
+  std::snprintf(padded, sizeof(padded), "%6s", buf);
+  M5.Display.setCursor(SCREEN_W - MARGIN - (6 * 6), TIME_Y + 2);
+  M5.Display.print(padded);
+}
 
-  drawPlayGlyph(SCREEN_W / 2 - 4, TIME_Y - 1, st.pb.is_playing, pal.text);
+void NowPlayingScreen::drawToastRow(const AppState &st) {
+  using namespace theme;
+  M5.Display.fillRect(0, TIME_Y, SCREEN_W, 10, pal.strip);
+  M5.Display.setFont(theme::fontSmall());
+  M5.Display.setTextColor(pal.warn, pal.strip);
+  const int w = M5.Display.textWidth(st.toast);
+  M5.Display.setCursor((SCREEN_W - w) / 2, TIME_Y + 2);
+  M5.Display.print(st.toast);
+}
+
+void NowPlayingScreen::drawPlayGlyphBox(const AppState &st) {
+  using namespace theme;
+  const int gx = SCREEN_W / 2 - 4;
+  const int gy = TIME_Y - 1;
+  // Only ever called when the state actually changed, so this small clear is
+  // not on the once-a-second path.
+  M5.Display.fillRect(gx - 1, gy - 1, 13, 13, pal.strip);
+  drawPlayGlyph(gx, gy, st.pb.is_playing, pal.text);
 }
 
 void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
@@ -227,6 +252,7 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
 
   if (force_) {
     M5.Display.fillScreen(pal.bg);
+    M5.Display.fillRect(0, STRIP_Y, SCREEN_W, STRIP_H, pal.strip);
   }
 
   if (force_ || album_changed) {
@@ -239,10 +265,28 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
       st.pb.volume_pct != last_volume_) {
     drawColumnFoot(st);
   }
-  if (force_ || progress_sec != last_progress_sec_ ||
-      st.pb.is_playing != last_playing_ || toast_active != last_toast_active_ ||
-      toast_active) {
-    drawStrip(st, now_ms);
+
+  if (force_ || progress_sec != last_progress_sec_) {
+    drawProgressBar(st);
+  }
+
+  // The toast borrows the time row, so redraw that row only on a real
+  // transition rather than every frame the toast happens to be up.
+  const bool toast_changed = (toast_active != last_toast_active_) ||
+                             (toast_active &&
+                              std::strcmp(last_toast_, st.toast) != 0);
+  if (force_ || toast_changed) {
+    if (toast_active) {
+      drawToastRow(st);
+    } else {
+      drawTimeRow(st, /*clear_first=*/true);
+    }
+  } else if (!toast_active && progress_sec != last_progress_sec_) {
+    drawTimeRow(st, /*clear_first=*/false);
+  }
+
+  if (force_ || st.pb.is_playing != last_playing_) {
+    drawPlayGlyphBox(st);
   }
 
   // A problem with the link shows as a small amber marker rather than stealing
@@ -261,6 +305,7 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
   last_liked_ = st.pb.liked;
   last_playing_ = st.pb.is_playing;
   last_toast_active_ = toast_active;
+  setStr(last_toast_, sizeof(last_toast_), st.toast);
   last_link_ = st.link;
   force_ = false;
 }
