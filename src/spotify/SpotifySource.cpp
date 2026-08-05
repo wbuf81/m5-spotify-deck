@@ -301,6 +301,11 @@ void SpotifySource::refreshLiked(AppState *out, uint32_t now_ms) {
 // restricted". Never logs tokens.
 void SpotifySource::diagnose(AppState *out, uint32_t now_ms) {
   const char *probes[] = {
+      // Response SIZE is the number that decides whether this fits on a board
+      // with no PSRAM. Spotify's `market` parameter is documented to replace
+      // the huge available_markets arrays with a single is_playable flag.
+      "/me/player",
+      "/me/player?market=from_token",
       "/me",
       "/me/player/devices",
       "/me/tracks?limit=1",
@@ -314,8 +319,13 @@ void SpotifySource::diagnose(AppState *out, uint32_t now_ms) {
   for (const char *p : probes) {
     HttpResponse r;
     if (call("GET", std::string(API) + p, "", &r, out, now_ms)) {
-      NETLOG("DIAG %-24s -> %d %.120s", p, r.status,
-             r.status >= 400 ? r.body.c_str() : "");
+      size_t am = 0, pos = 0;
+      while ((pos = r.body.find("available_markets", pos)) != std::string::npos) {
+        ++am;
+        pos += 17;
+      }
+      NETLOG("DIAG %-34s -> %d  %6zu bytes  available_markets x%zu", p,
+             r.status, r.body.size(), am);
     } else {
       NETLOG("DIAG %-24s -> transport/auth failure", p);
     }

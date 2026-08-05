@@ -192,18 +192,30 @@ Any of these may be absent or null in a valid response — notably
 `--` (volume) or fall back to the `Nothing playing` state (`item`); they are never
 treated as zero.
 
-### The `available_markets` trap
+### Response size — the `available_markets` trap, corrected
 
-**This is the single detail most likely to sink the build.** The `/me/player`
-response embeds `available_markets` arrays on the track and album objects
-containing hundreds of ISO country codes. Parsing the response naively will
-exhaust the heap and hard-reset the device.
+This spec originally called `available_markets` "the single detail most likely
+to sink the build", claiming the `/me/player` payload carries hundreds of
+country codes on both the track and album objects and would exhaust heap.
 
-Mitigation is mandatory: ArduinoJson's `DeserializationOption::Filter` with a
-filter document naming only the fields listed above. The parser then skips
-everything else without ever allocating it. A host-side test asserts extraction
-against a committed real-world fixture so a silently-dropped field is caught by
-CI rather than by staring at the device.
+**Measured against the live API, that is false.** The response is **3.8KB** and
+contains **zero** occurrences of `available_markets`. Passing
+`market=from_token` makes it marginally *larger* (3853 vs 3799 bytes), so it is
+not worth adding.
+
+Measured payloads, for sizing the device port:
+
+| Endpoint | Size |
+|---|---|
+| `/me/player` | 3.8 KB |
+| `/me/tracks?limit=1` | 2.9 KB |
+| `/me/albums?limit=1` | 16.0 KB |
+| `/me/library/contains` | 7 bytes |
+
+The ArduinoJson filter stays, because it lowers peak parse memory and guards
+against the payload growing again, but it is a prudent measure rather than the
+project's central risk. The original claim came from prior knowledge of the API
+rather than from measurement, and prior knowledge was out of date.
 
 ### Liked state
 
