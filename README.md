@@ -50,6 +50,7 @@ nothing playing.
 | `EMU_TOAST=<text>` | Raise a toast at startup, to inspect the toast row without a keypress |
 | `EMU_FIRE=<like\|unlike\|playpause>` | Fire a user action at a known time, to sample animations |
 | `EMU_FIRE_MS=<ms>` | When `EMU_FIRE` triggers (default 500) |
+| `EMU_LINK=<connecting\|offline\|autherror\|reauth\|notrack>` | Force a link state to inspect the status screen |
 | `EMU_DUMP=<path>` | Write the framebuffer as a 24-bit BMP |
 | `EMU_EXIT_AFTER=<n>` | Quit after *n* frames. Note `loop()` runs as fast as SDL allows, so this is **not** a wall-clock proxy — prefer `EMU_EXIT_MS` when waiting on the network |
 
@@ -72,6 +73,29 @@ Captured from the emulator at native 320×240.
 
 Accented text, which is why the fonts are the Unicode `lgfxJapanGothicP` faces
 rather than Adafruit's ASCII-only FreeSans.
+
+## Tests
+
+```sh
+./tools/run_tests.sh
+```
+
+Two layers, because they catch different things:
+
+- **`pio test -e test`** — 22 host unit tests over the display-free logic:
+  button state machine, command coalescing, the progress clock, the merge
+  policy's settle windows, time formatting. No SDL, no M5GFX, runs in seconds.
+- **`tools/visual_tests.py`** — 11 checks that run the emulator headlessly and
+  assert on real framebuffer pixels.
+
+The visual layer is not optional. Every rendering bug this project has hit was
+invisible to logic tests and obvious in a screenshot: toast text ghosting under
+the timecodes, the play glyph vanishing after a like, the clock stuttering in
+two-second steps. Each of those now has a test named after the symptom.
+
+No golden images — they rot whenever a colour or font changes. The checks
+assert properties that should hold regardless ("no amber pixels remain in the
+info row after a toast expires").
 
 ## Live Spotify
 

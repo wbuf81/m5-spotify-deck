@@ -7,6 +7,7 @@
 
 #include "../art/ArtRenderer.h"
 #include "Anim.h"
+#include "TimeFormat.h"
 #include "Theme.h"
 
 namespace {
@@ -67,11 +68,6 @@ int wrapText(const char *text, int max_w, char out[][MAX_LINE], int max_lines) {
   }
 
   return nlines;
-}
-
-void formatTime(uint32_t ms, char *out, size_t cap) {
-  const uint32_t total = ms / 1000;
-  std::snprintf(out, cap, "%u:%02u", total / 60, total % 60);
 }
 
 // Sprite sizes are kept small enough that the heart's expanding ring cannot
@@ -227,7 +223,7 @@ void NowPlayingScreen::drawProgressBar(const AppState &st) {
 void NowPlayingScreen::drawTimeRow(const AppState &st, bool clear_first) {
   using namespace theme;
   if (clear_first) {
-    M5.Display.fillRect(0, TIME_Y, SCREEN_W, 10, pal.strip);
+    M5.Display.fillRect(0, ROW_Y, SCREEN_W, ROW_H, pal.strip);
   }
 
   M5.Display.setFont(theme::fontSmall());
@@ -238,22 +234,25 @@ void NowPlayingScreen::drawTimeRow(const AppState &st, bool clear_first) {
   char buf[16];
   char padded[16];
 
-  // Fixed-width fields with a fixed-width font keep the pixel extents stable,
-  // so a shrinking string (10:00 -> 9:59) leaves no residue behind.
-  formatTime(st.pb.progress_ms, buf, sizeof(buf));
-  std::snprintf(padded, sizeof(padded), "%-6s", buf);
+  // Fixed-width fields with a monospaced face keep pixel extents stable, so a
+  // shrinking string (10:00 -> 9:59) leaves no residue behind.
+  formatElapsed(st.pb.progress_ms, buf, sizeof(buf));
+  std::snprintf(padded, sizeof(padded), "%-7s", buf);
   M5.Display.setCursor(BAR_X, TIME_Y + 2);
   M5.Display.print(padded);
 
-  formatTime(st.pb.duration_ms, buf, sizeof(buf));
-  std::snprintf(padded, sizeof(padded), "%6s", buf);
-  M5.Display.setCursor(SCREEN_W - MARGIN - (6 * 6), TIME_Y + 2);
+  // Right-hand figure counts down. Showing total duration there looked frozen,
+  // because it is — the leading minus makes "remaining" unambiguous.
+  formatRemaining(st.pb.progress_ms, st.pb.duration_ms, buf, sizeof(buf));
+  const int rw = M5.Display.textWidth("-00:00");
+  std::snprintf(padded, sizeof(padded), "%7s", buf);
+  M5.Display.setCursor(SCREEN_W - MARGIN - rw, TIME_Y + 2);
   M5.Display.print(padded);
 }
 
 void NowPlayingScreen::drawToastRow(const AppState &st) {
   using namespace theme;
-  M5.Display.fillRect(0, TIME_Y, SCREEN_W, 10, pal.strip);
+  M5.Display.fillRect(0, ROW_Y, SCREEN_W, ROW_H, pal.strip);
   M5.Display.setFont(theme::fontSmall());
   M5.Display.setTextColor(pal.warn, pal.strip);
   const int w = M5.Display.textWidth(st.toast);

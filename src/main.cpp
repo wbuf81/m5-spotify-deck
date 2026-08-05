@@ -19,7 +19,9 @@
 #include "input/Buttons.h"
 #include "platform/native/FrameDump.h"
 #include "sources/FakeSource.h"
+#include "core/ProgressClock.h"
 #include "ui/NowPlayingScreen.h"
+#include "ui/StatusScreen.h"
 #include "ui/Theme.h"
 
 #if defined(EMULATOR)
@@ -59,6 +61,8 @@ AppState g_state;
 CommandQueue<> g_cmds;
 FakeSource g_fake;
 NowPlayingScreen g_screen;
+StatusScreen g_status;
+bool g_showing_status = false;
 Buttons g_buttons;
 
 bool g_live = false;
@@ -71,10 +75,7 @@ uint32_t g_last_frame_ms = 0;
 uint32_t g_not_playing_since_ms = 0;
 uint8_t g_brightness = theme::BRIGHT_ACTIVE;
 
-// UI-owned playback clock, advanced every frame and resynced only when a
-// source publishes. See the extrapolation note in loop().
-uint32_t g_ui_progress_ms = 0;
-uint32_t g_last_publish_seq = 0;
+ProgressClock g_clock;
 
 bool g_volume_dirty = false;
 uint32_t g_volume_changed_at_ms = 0;
@@ -266,30 +267,22 @@ void loop(void) {
     // lands — a 2s stutter instead of a 1s tick. So keep our own progress and
     // resync it only when the sequence number says the data is actually new.
     const AppState snap = g_net->snapshot();
-    const bool fresh = snap.publish_seq != g_last_publish_seq;
-    g_last_publish_seq = snap.publish_seq;
-
     g_state = snap;
-    if (fresh) {
-      g_ui_progress_ms = snap.pb.progress_ms;
-    }
-    g_state.pb.progress_ms = g_ui_progress_ms;
+    g_clock.sync(snap.publish_seq, snap.pb.progress_ms);
+    g_state.pb.progress_ms = g_clock.value();
   }
 #endif
 
   if (!g_live) {
     g_fake.poll(&g_state, &g_cmds, now);
-    g_ui_progress_ms = g_state.pb.progress_ms;
+    g_clock.reset(g_state.pb.progress_ms);
   }
 
-  // Progress extrapolation between polls, so the bar ticks every second even
-  // though the source only publishes every two.
-  if (g_state.pb.is_playing && g_state.pb.has_track) {
-    g_ui_progress_ms += frame_dt;
-    if (g_ui_progress_ms > g_state.pb.duration_ms) {
-      g_ui_progress_ms = g_state.pb.duration_ms;
-    }
-    g_state.pb.progress_ms = g_ui_progress_ms;
+  // Extrapolate between publishes so the display ticks every second even
+  // though the source only reports every two.
+  if (g_state.pb.has_track) {
+    g_clock.advance(frame_dt, g_state.pb.is_playing, g_state.pb.duration_ms);
+    g_state.pb.progress_ms = g_clock.value();
   }
 
   if (g_state.pb.is_playing) {
@@ -299,7 +292,18 @@ void loop(void) {
   updateBrightness(now);
 
   if (g_brightness != theme::BRIGHT_OFF) {
-    g_screen.render(g_state, now);
+    const bool want_status = StatusScreen::shouldShow(g_state);
+    if (want_status != g_showing_status) {
+      g_showing_status = want_status;
+      // Switching screens leaves the whole panel stale.
+      g_status.invalidate();
+      g_screen.invalidate();
+    }
+    if (want_status) {
+      g_status.render(g_state, now);
+    } else {
+      g_screen.render(g_state, now);
+    }
   } else if (!was_asleep) {
     M5.Display.fillScreen(TFT_BLACK);
     g_screen.invalidate();
@@ -328,6 +332,16 @@ void loop(void) {
         });
       }
     }
+  }
+
+  // EMU_LINK=<connecting|offline|autherror|reauth|notrack> forces a link state
+  // so the status screen can be inspected and tested without unplugging.
+  if (const char *l = std::getenv("EMU_LINK")) {
+    if (std::strcmp(l, "connecting") == 0) g_state.link = LinkStatus::Connecting;
+    else if (std::strcmp(l, "offline") == 0) g_state.link = LinkStatus::Offline;
+    else if (std::strcmp(l, "autherror") == 0) g_state.link = LinkStatus::AuthError;
+    else if (std::strcmp(l, "reauth") == 0) g_state.link = LinkStatus::ReauthNeeded;
+    else if (std::strcmp(l, "notrack") == 0) g_state.pb.has_track = false;
   }
 
   // Two exit hooks. EMU_EXIT_MS is wall-clock and is the one to use when

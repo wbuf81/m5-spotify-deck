@@ -33,6 +33,13 @@ constexpr int BAR_X = MARGIN;
 constexpr int BAR_W = SCREEN_W - (MARGIN * 2);
 constexpr int TIME_Y = 212;
 
+// The whole info row beneath the progress bar: timecodes, play glyph, toast.
+// Clearing it must cover full glyph extents, not an assumed line height — a
+// hardcoded 10px clear left the descenders of the taller JetBrains Mono face
+// behind, which showed up as toast text ghosting under the timecodes.
+constexpr int ROW_Y = BAR_Y + BAR_H + 3;
+constexpr int ROW_H = SCREEN_H - ROW_Y;
+
 // Brightness levels from the spec.
 constexpr uint8_t BRIGHT_ACTIVE = 180;
 constexpr uint8_t BRIGHT_IDLE = 60;
