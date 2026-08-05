@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "../art/ArtRenderer.h"
+#include "Anim.h"
 #include "Theme.h"
 
 namespace {
@@ -73,23 +74,53 @@ void formatTime(uint32_t ms, char *out, size_t cap) {
   std::snprintf(out, cap, "%u:%02u", total / 60, total % 60);
 }
 
-// Two lobes and a point. Cheaper and far more legible at this size than any
-// font glyph would be.
-void drawHeart(int x, int y, uint16_t color) {
-  M5.Display.fillCircle(x + 3, y + 3, 3, color);
-  M5.Display.fillCircle(x + 8, y + 3, 3, color);
-  M5.Display.fillTriangle(x, y + 4, x + 11, y + 4, x + 5, y + 11, color);
+// Sprite sizes are kept small enough that the heart's expanding ring cannot
+// reach into the artwork on its left, and the glyph cannot reach the timecodes
+// on either side of it.
+constexpr int HEART_CV = 24;
+constexpr int GLYPH_CV_W = 18;
+constexpr int GLYPH_CV_H = 14;
+
+constexpr uint32_t HEART_ANIM_MS = 420;
+constexpr uint32_t GLYPH_ANIM_MS = 240;
+
+// Two lobes and a point, scalable about its own centre. Cheaper and far more
+// legible at this size than any font glyph would be.
+void drawHeartScaled(M5Canvas *cv, float cx, float cy, float s, uint16_t color) {
+  cv->fillCircle(static_cast<int>(cx - 2.5f * s), static_cast<int>(cy - 3.0f * s),
+                 static_cast<int>(3.0f * s + 0.5f), color);
+  cv->fillCircle(static_cast<int>(cx + 2.5f * s), static_cast<int>(cy - 3.0f * s),
+                 static_cast<int>(3.0f * s + 0.5f), color);
+  cv->fillTriangle(static_cast<int>(cx - 5.5f * s), static_cast<int>(cy - 2.0f * s),
+                   static_cast<int>(cx + 5.5f * s), static_cast<int>(cy - 2.0f * s),
+                   static_cast<int>(cx), static_cast<int>(cy + 5.0f * s), color);
 }
 
-// Status indicator, not a button: it reports what the player is doing, so
-// playing shows a triangle. (A touch button would show the inverse — the action
-// it would perform.)
-void drawPlayGlyph(int x, int y, bool playing, uint16_t color) {
-  if (playing) {
-    M5.Display.fillTriangle(x, y, x, y + 10, x + 9, y + 5, color);
-  } else {
-    M5.Display.fillRect(x, y, 3, 10, color);
-    M5.Display.fillRect(x + 5, y, 3, 10, color);
+// Morphs pause bars into a play triangle by drawing the glyph as a row of
+// vertical columns and interpolating each column's height between the two
+// shapes. Genuine morph rather than a crossfade, which the panel could not do
+// anyway without alpha.
+//
+//   playness 0 = two bars, 1 = triangle
+void drawGlyphMorph(M5Canvas *cv, float cx, float cy, float playness,
+                    uint16_t color) {
+  constexpr int W = 11;
+  constexpr float H = 11.0f;
+  const float x0 = cx - (W / 2.0f);
+
+  for (int i = 0; i < W; ++i) {
+    const float fx = static_cast<float>(i) / (W - 1);
+
+    // Pause: full-height where a bar is, nothing in the gap or the tail.
+    const float bars = (fx <= 0.30f || (fx >= 0.58f && fx <= 0.88f)) ? 1.0f : 0.0f;
+    // Play: linearly tapering to a point on the right.
+    const float tri = 1.0f - (fx * 0.95f);
+
+    const float h = anim::lerp(bars, tri, playness) * H;
+    if (h < 1.0f) continue;
+    const int ih = static_cast<int>(h + 0.5f);
+    cv->fillRect(static_cast<int>(x0 + i), static_cast<int>(cy - ih / 2.0f), 1,
+                 ih, color);
   }
 }
 
@@ -160,13 +191,8 @@ void NowPlayingScreen::drawColumnFoot(const AppState &st) {
   const int foot_y = COL_Y + COL_H - FOOT_H;
   M5.Display.fillRect(COL_X, foot_y, COL_W, FOOT_H, pal.bg);
 
-  // No heart at all when saved-state is unknown. A dim heart would read as
-  // "not liked", which is a claim we cannot make when the API refuses to tell
-  // us. Absence is the honest rendering.
-  if (st.pb.liked_known) {
-    drawHeart(COL_X, foot_y + 1, st.pb.liked ? pal.accent : pal.bar_bg);
-  }
-
+  // The heart is drawn by drawHeartRegion, which owns a sprite so it can
+  // animate without tearing. Clearing here is enough; that call repaints it.
   M5.Display.setFont(theme::fontSmall());
   M5.Display.setTextColor(pal.dim);
   char vol[8];
@@ -235,14 +261,92 @@ void NowPlayingScreen::drawToastRow(const AppState &st) {
   M5.Display.print(st.toast);
 }
 
-void NowPlayingScreen::drawPlayGlyphBox(const AppState &st) {
+void NowPlayingScreen::ensureSprites() {
+  if (heart_cv_) return;
+  heart_cv_ = new M5Canvas(&M5.Display);
+  heart_cv_->setColorDepth(16);
+  heart_cv_->createSprite(HEART_CV, HEART_CV);
+
+  glyph_cv_ = new M5Canvas(&M5.Display);
+  glyph_cv_->setColorDepth(16);
+  glyph_cv_->createSprite(GLYPH_CV_W, GLYPH_CV_H);
+}
+
+void NowPlayingScreen::drawHeartRegion(const AppState &st, uint32_t now_ms) {
   using namespace theme;
-  const int gx = SCREEN_W / 2 - 4;
-  const int gy = TIME_Y - 1;
-  // Only ever called when the state actually changed, so this small clear is
-  // not on the once-a-second path.
-  M5.Display.fillRect(gx - 1, gy - 1, 13, 13, pal.strip);
-  drawPlayGlyph(gx, gy, st.pb.is_playing, pal.text);
+  ensureSprites();
+
+  constexpr int FOOT_H = 14;
+  const int foot_y = COL_Y + COL_H - FOOT_H;
+  // Positioned so the ring at full radius still clears the artwork's right edge.
+  const int ox = COL_X - 7;
+  const int oy = foot_y - 5;
+  const float cx = static_cast<float>(COL_X + 5 - ox);
+  const float cy = static_cast<float>(foot_y + 7 - oy);
+
+  heart_cv_->fillSprite(pal.bg);
+
+  // Saved-state unknown: draw nothing. A dim heart would assert "not liked",
+  // which we cannot claim when the API declines to answer.
+  if (!st.pb.liked_known) {
+    heart_cv_->pushSprite(ox, oy);
+    return;
+  }
+
+  float scale = 1.0f;
+  uint16_t color = st.pb.liked ? pal.accent : pal.bar_bg;
+
+  if (heart_anim_active_) {
+    const float t = anim::phase(heart_anim_start_ms_, now_ms, HEART_ANIM_MS);
+    const float p = anim::pulse(t);
+
+    if (heart_anim_liking_) {
+      // Overshoot and settle, with a ring blooming outward and fading into the
+      // background as it goes.
+      scale = 1.0f + 0.60f * p;
+      color = anim::lerp565(pal.bar_bg, pal.accent, anim::easeOutCubic(t));
+
+      const int r = static_cast<int>(anim::lerp(3.0f, 11.0f, anim::easeOutCubic(t)));
+      const uint16_t ring = anim::lerp565(pal.accent, pal.bg, t);
+      heart_cv_->drawCircle(static_cast<int>(cx), static_cast<int>(cy), r, ring);
+      if (r > 1) {
+        heart_cv_->drawCircle(static_cast<int>(cx), static_cast<int>(cy), r - 1, ring);
+      }
+    } else {
+      // Unliking: a smaller inward dip, draining back to the inactive colour.
+      scale = 1.0f - 0.35f * p;
+      color = anim::lerp565(pal.accent, pal.bar_bg, anim::easeOutCubic(t));
+    }
+
+    if (t >= 1.0f) heart_anim_active_ = false;
+  }
+
+  drawHeartScaled(heart_cv_, cx, cy, scale, color);
+  heart_cv_->pushSprite(ox, oy);
+}
+
+void NowPlayingScreen::drawGlyphRegion(const AppState &st, uint32_t now_ms) {
+  using namespace theme;
+  ensureSprites();
+
+  const int ox = SCREEN_W / 2 - (GLYPH_CV_W / 2);
+  const int oy = TIME_Y - 2;
+
+  glyph_cv_->fillSprite(pal.strip);
+
+  float playness = st.pb.is_playing ? 1.0f : 0.0f;
+  if (glyph_anim_active_) {
+    const float t =
+        anim::easeInOutCubic(anim::phase(glyph_anim_start_ms_, now_ms, GLYPH_ANIM_MS));
+    playness = glyph_anim_to_playing_ ? t : (1.0f - t);
+    if (anim::phase(glyph_anim_start_ms_, now_ms, GLYPH_ANIM_MS) >= 1.0f) {
+      glyph_anim_active_ = false;
+    }
+  }
+
+  drawGlyphMorph(glyph_cv_, GLYPH_CV_W / 2.0f, GLYPH_CV_H / 2.0f, playness,
+                 pal.text);
+  glyph_cv_->pushSprite(ox, oy);
 }
 
 void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
@@ -266,10 +370,25 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
   if (force_ || track_changed) {
     drawTextColumn(st);
   }
+  // Start the heart animation on a real like/unlike, not on the first sight of
+  // a track or on saved-state simply becoming known — neither is a user action
+  // and animating them would make the display twitch on every track change.
+  if (!force_ && !track_changed && last_liked_known_ && st.pb.liked_known &&
+      st.pb.liked != last_liked_) {
+    heart_anim_active_ = true;
+    heart_anim_liking_ = st.pb.liked;
+    heart_anim_start_ms_ = now_ms;
+  }
+
   if (force_ || track_changed || st.pb.liked != last_liked_ ||
       st.pb.liked_known != last_liked_known_ ||
       st.pb.volume_pct != last_volume_) {
     drawColumnFoot(st);
+  }
+
+  if (force_ || track_changed || st.pb.liked != last_liked_ ||
+      st.pb.liked_known != last_liked_known_ || heart_anim_active_) {
+    drawHeartRegion(st, now_ms);
   }
 
   if (force_ || progress_sec != last_progress_sec_) {
@@ -290,16 +409,23 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
       // play glyph erased until the next play/pause, which looks like the
       // button vanished.
       drawTimeRow(st, /*clear_first=*/true);
-      drawPlayGlyphBox(st);
+      drawGlyphRegion(st, now_ms);
     }
   } else if (!toast_active && progress_sec != last_progress_sec_) {
     drawTimeRow(st, /*clear_first=*/false);
   }
 
+  if (!force_ && st.pb.is_playing != last_playing_) {
+    glyph_anim_active_ = true;
+    glyph_anim_to_playing_ = st.pb.is_playing;
+    glyph_anim_start_ms_ = now_ms;
+  }
+
   // Suppressed while a toast is up: the glyph would punch a hole through the
   // message. The restore path above repaints it from current state anyway.
-  if (!toast_active && (force_ || st.pb.is_playing != last_playing_)) {
-    drawPlayGlyphBox(st);
+  if (!toast_active &&
+      (force_ || st.pb.is_playing != last_playing_ || glyph_anim_active_)) {
+    drawGlyphRegion(st, now_ms);
   }
 
   // A problem with the link shows as a small amber marker rather than stealing

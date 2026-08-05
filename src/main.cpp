@@ -25,6 +25,7 @@
 #if defined(EMULATOR)
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #endif
 
 #if defined(__has_include)
@@ -305,6 +306,30 @@ void loop(void) {
   }
 
 #if defined(EMULATOR)
+  // EMU_FIRE=<like|unlike|playpause> with EMU_FIRE_MS fires a user action at a
+  // known time, so animations can be sampled frame by frame without a keypress.
+  if (const char *what = std::getenv("EMU_FIRE")) {
+    static bool fired = false;
+    const char *at_s = std::getenv("EMU_FIRE_MS");
+    const uint32_t at = at_s ? static_cast<uint32_t>(std::atoi(at_s)) : 500;
+    static const uint32_t t0 = now;
+    if (!fired && (now - t0) >= at) {
+      fired = true;
+      if (std::strcmp(what, "playpause") == 0) {
+        mutateState([&](AppState &st) {
+          st.pb.is_playing = !st.pb.is_playing;
+          st.settle_playing_until_ms = now + SETTLE_MS;
+        });
+      } else {
+        mutateState([&](AppState &st) {
+          st.pb.liked = (std::strcmp(what, "like") == 0);
+          st.pb.liked_known = true;
+          st.settle_liked_until_ms = now + SETTLE_MS;
+        });
+      }
+    }
+  }
+
   // Two exit hooks. EMU_EXIT_MS is wall-clock and is the one to use when
   // waiting on the network: loop() runs as fast as SDL allows, so a frame count
   // can elapse in well under a second and kill the process mid-request.

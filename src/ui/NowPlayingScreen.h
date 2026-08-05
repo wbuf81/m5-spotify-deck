@@ -1,5 +1,7 @@
 #pragma once
 
+#include <M5Unified.h>
+
 #include <cstdint>
 
 #include "../core/AppState.h"
@@ -16,13 +18,16 @@ class NowPlayingScreen {
   void render(const AppState &st, uint32_t now_ms);
 
  private:
+  void ensureSprites();
+  void drawHeartRegion(const AppState &st, uint32_t now_ms);
+  void drawGlyphRegion(const AppState &st, uint32_t now_ms);
   void drawArtRegion(const AppState &st);
   void drawTextColumn(const AppState &st);
   void drawColumnFoot(const AppState &st);
   void drawProgressBar(const AppState &st);
   void drawTimeRow(const AppState &st, bool clear_first);
   void drawToastRow(const AppState &st);
-  void drawPlayGlyphBox(const AppState &st);
+
 
   bool force_ = true;
   char last_album_[ID_LEN] = {};
@@ -32,6 +37,20 @@ class NowPlayingScreen {
   bool last_liked_ = false;
   bool last_liked_known_ = false;
   bool last_playing_ = false;
+  // Animation state. Both animations render into their own small sprite and
+  // are pushed as a single blit, so redrawing them every frame cannot produce
+  // the mid-draw tearing that a direct clear-and-repaint would.
+  M5Canvas *heart_cv_ = nullptr;
+  M5Canvas *glyph_cv_ = nullptr;
+
+  bool heart_anim_active_ = false;
+  bool heart_anim_liking_ = false;
+  uint32_t heart_anim_start_ms_ = 0;
+
+  bool glyph_anim_active_ = false;
+  bool glyph_anim_to_playing_ = false;
+  uint32_t glyph_anim_start_ms_ = 0;
+
   bool last_toast_active_ = false;
   char last_toast_[64] = {};
   LinkStatus last_link_ = LinkStatus::Booting;
