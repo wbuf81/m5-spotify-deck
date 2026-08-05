@@ -70,6 +70,11 @@ uint32_t g_last_frame_ms = 0;
 uint32_t g_not_playing_since_ms = 0;
 uint8_t g_brightness = theme::BRIGHT_ACTIVE;
 
+// UI-owned playback clock, advanced every frame and resynced only when a
+// source publishes. See the extrapolation note in loop().
+uint32_t g_ui_progress_ms = 0;
+uint32_t g_last_publish_seq = 0;
+
 bool g_volume_dirty = false;
 uint32_t g_volume_changed_at_ms = 0;
 
@@ -254,21 +259,36 @@ void loop(void) {
 
 #if defined(CAN_GO_LIVE)
   if (g_live && g_net) {
-    g_state = g_net->snapshot();
+    // The snapshot is the net thread's last published state, re-read every
+    // frame. Copying it wholesale would overwrite the locally extrapolated
+    // progress on every frame, leaving the clock to advance only when a poll
+    // lands — a 2s stutter instead of a 1s tick. So keep our own progress and
+    // resync it only when the sequence number says the data is actually new.
+    const AppState snap = g_net->snapshot();
+    const bool fresh = snap.publish_seq != g_last_publish_seq;
+    g_last_publish_seq = snap.publish_seq;
+
+    g_state = snap;
+    if (fresh) {
+      g_ui_progress_ms = snap.pb.progress_ms;
+    }
+    g_state.pb.progress_ms = g_ui_progress_ms;
   }
 #endif
 
   if (!g_live) {
     g_fake.poll(&g_state, &g_cmds, now);
+    g_ui_progress_ms = g_state.pb.progress_ms;
   }
 
   // Progress extrapolation between polls, so the bar ticks every second even
   // though the source only publishes every two.
   if (g_state.pb.is_playing && g_state.pb.has_track) {
-    g_state.pb.progress_ms += frame_dt;
-    if (g_state.pb.progress_ms > g_state.pb.duration_ms) {
-      g_state.pb.progress_ms = g_state.pb.duration_ms;
+    g_ui_progress_ms += frame_dt;
+    if (g_ui_progress_ms > g_state.pb.duration_ms) {
+      g_ui_progress_ms = g_state.pb.duration_ms;
     }
+    g_state.pb.progress_ms = g_ui_progress_ms;
   }
 
   if (g_state.pb.is_playing) {

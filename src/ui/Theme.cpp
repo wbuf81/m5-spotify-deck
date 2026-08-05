@@ -1,5 +1,7 @@
 #include "Theme.h"
 
+#include "fonts/JBMono.h"
+
 namespace theme {
 
 Palette pal{};
@@ -24,9 +26,13 @@ uint16_t scaled(uint32_t rgb888, float f) {
 
 }  // namespace
 
-const lgfx::IFont *fontTitle() { return &fonts::lgfxJapanGothicP_20; }
-const lgfx::IFont *fontArtist() { return &fonts::lgfxJapanGothicP_16; }
-const lgfx::IFont *fontSmall() { return &fonts::Font0; }
+// JetBrains Mono throughout. Monospace costs horizontal room in the narrow
+// text column, so the title runs smaller than the proportional face it
+// replaced — but the timecodes gain fixed-width digits, which stops them
+// jittering as the seconds tick.
+const lgfx::IFont *fontTitle() { return &JetBrainsMonoNerdFont_Bold8pt8b; }
+const lgfx::IFont *fontArtist() { return &JetBrainsMonoNerdFont_Regular7pt8b; }
+const lgfx::IFont *fontSmall() { return &JetBrainsMonoNerdFont_Regular6pt8b; }
 
 void applyBrightness(uint8_t brightness) {
   // On hardware the backlight does the work, which also saves power. In the

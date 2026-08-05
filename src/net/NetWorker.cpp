@@ -88,6 +88,8 @@ void NetWorker::merge(const AppState &from, bool polled, uint32_t now_ms) {
   if (track_changed || from.pb.liked_known) {
     state_.pb.liked_known = from.pb.liked_known;
   }
+
+  ++state_.publish_seq;
 }
 
 void NetWorker::run() {

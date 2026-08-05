@@ -19,6 +19,11 @@ struct AppState {
   PlaybackState pb;
   LinkStatus link = LinkStatus::Booting;
 
+  // Bumped every time a source publishes fresh data. The UI extrapolates
+  // progress between publishes and resyncs only when this changes; without it
+  // there is no way to distinguish a new poll from re-reading the same state.
+  uint32_t publish_seq = 0;
+
   // Transient message shown in the bottom strip in place of the time row.
   char toast[64] = {};
   uint32_t toast_until_ms = 0;
