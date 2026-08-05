@@ -15,6 +15,7 @@
 
 #include "core/AppState.h"
 #include "core/Clock.h"
+#include "core/Diag.h"
 #include "core/CommandQueue.h"
 #include "input/Buttons.h"
 #include "platform/native/FrameDump.h"
@@ -208,7 +209,8 @@ void setup(void) {
   const bool force_fake = false;
   // Arduino's SD library mounts at /sd through the ESP-IDF VFS, so the same
   // POSIX file code serves both platforms.
-  mountStorage();
+  const bool sd_ok = mountStorage();
+  bootBanner(sd_ok);
   const char *cache_dir = "/sd/art";
 #endif
   if (!force_fake) {
@@ -299,6 +301,7 @@ void loop(void) {
   }
 
   updateBrightness(now);
+  heapTick(now);
 
   if (g_brightness != theme::BRIGHT_OFF) {
     const bool want_status = StatusScreen::shouldShow(g_state);

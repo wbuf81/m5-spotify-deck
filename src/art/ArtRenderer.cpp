@@ -7,9 +7,22 @@
 
 namespace {
 
-// Reads the whole JPEG into RAM. Fine in the emulator, and fine on hardware for
-// a 300px cover (~25KB), but the device path will stream from SD instead so that
-// a 640px cover never has to fit in heap all at once.
+// Buffered decode on both platforms.
+//
+// The spec originally required streaming from SD so a cover never sat in heap
+// whole. Two things changed that. This M5GFX version has no
+// DataWrapperT<fs::FS> specialisation, so drawJpgFile cannot be handed the SD
+// object at all; and the sizing that motivated streaming does not hold — we
+// select the smallest image at or above the 176px artwork region, which is
+// Spotify's 300px variant at roughly 25-40KB, against ~275KB of free heap.
+//
+// The download still streams straight to disk (see Esp32HttpClient), which was
+// always the larger win: the file never sits in RAM while it is being fetched.
+// Buffering only for the decode keeps one code path across both platforms, so
+// the emulator exercises exactly what the device runs.
+//
+// If heap ever gets tight, the fix is a custom DataWrapper over stdio rather
+// than a second code path.
 bool readFile(const char *path, std::vector<uint8_t> *out) {
   FILE *f = std::fopen(path, "rb");
   if (!f) return false;
@@ -26,36 +39,50 @@ bool readFile(const char *path, std::vector<uint8_t> *out) {
   return n == out->size();
 }
 
+// Decodes a JPEG into any LovyanGFX target — the panel, or an off-screen
+// sprite — fitted to `size`.
+//
+// scale 0.0 asks LovyanGFX to fit maxWidth/maxHeight, which is what makes the
+// non-power-of-two 300 -> 176 reduction work without hardcoding the source
+// dimensions. On the device the path lives under /sd, which Arduino's SD
+// library exposes to stdio through the ESP-IDF VFS.
+bool decodeInto(LovyanGFX *dst, const char *path, int x, int y, int size) {
+  std::vector<uint8_t> jpg;
+  if (!readFile(path, &jpg)) return false;
+  return dst->drawJpg(jpg.data(), jpg.size(), x, y, size, size, 0, 0, 0.0f, 0.0f);
+}
+
 }  // namespace
 
 bool drawArt(const char *path, int x, int y, int size) {
   if (!path || path[0] == '\0') return false;
-
-  std::vector<uint8_t> jpg;
-  if (!readFile(path, &jpg)) return false;
-
-  // scale 0.0 asks LovyanGFX to fit the image to maxWidth/maxHeight, which is
-  // what makes the non-power-of-two 300 -> 176 reduction work without us
-  // hardcoding the source dimensions.
-  return M5.Display.drawJpg(jpg.data(), jpg.size(), x, y, size, size, 0, 0, 0.0f,
-                            0.0f);
+  return decodeInto(&M5.Display, path, x, y, size);
 }
 
-uint16_t sampleArtTint(int x, int y, int size, uint16_t fallback) {
-  constexpr int GRID = 14;
+uint16_t sampleArtTint(const char *path, uint16_t fallback) {
+  if (!path || path[0] == '\0') return fallback;
+
+  // Decode a thumbnail into an off-screen sprite and sample that, rather than
+  // reading pixels back off the panel. ILI9342C readback is slow over SPI and
+  // unreliable on some units; sprite reads are plain memory. A second decode at
+  // this size is cheap next to that risk.
+  constexpr int TH = 40;
+  M5Canvas thumb(&M5.Display);
+  thumb.setColorDepth(16);
+  if (!thumb.createSprite(TH, TH)) return fallback;
+  thumb.fillSprite(0);
+
+  if (!decodeInto(&thumb, path, 0, 0, TH)) {
+    thumb.deleteSprite();
+    return fallback;
+  }
+
   uint16_t best = fallback;
   float best_score = 0.0f;
 
-  for (int gy = 0; gy < GRID; ++gy) {
-    for (int gx = 0; gx < GRID; ++gx) {
-      const int px = x + (size * gx) / GRID + (size / (GRID * 2));
-      const int py = y + (size * gy) / GRID + (size / (GRID * 2));
-
-      uint16_t raw = 0;
-      M5.Display.readRect(px, py, 1, 1, &raw);
-      // Panel bus order: the same byte swap the framebuffer dumper needs.
-      const uint16_t c = static_cast<uint16_t>((raw >> 8) | (raw << 8));
-
+  for (int py = 0; py < TH; ++py) {
+    for (int px = 0; px < TH; ++px) {
+      const uint16_t c = thumb.readPixel(px, py);
       const int r = ((c >> 11) & 0x1F) << 3;
       const int g = ((c >> 5) & 0x3F) << 2;
       const int b = (c & 0x1F) << 3;
@@ -67,9 +94,8 @@ uint16_t sampleArtTint(int x, int y, int size, uint16_t fallback) {
       const float sat = static_cast<float>(mx - mn) / mx;
       const float val = mx / 255.0f;
 
-      // Favour vivid mid-to-bright colours. Weighting saturation above value
-      // keeps it from always picking whatever is merely brightest, which on
-      // most covers is a white or a blown-out highlight.
+      // Saturation weighted above value, so this does not simply pick whatever
+      // is brightest — on most covers that is a white or a blown highlight.
       const float score = (sat * sat) * (0.35f + 0.65f * val);
       if (score > best_score) {
         best_score = score;
@@ -78,13 +104,13 @@ uint16_t sampleArtTint(int x, int y, int size, uint16_t fallback) {
     }
   }
 
-  // A cover with nothing vivid in it (monochrome sleeves, dark photography)
-  // should not produce a muddy tint.
+  thumb.deleteSprite();
+
+  // Monochrome sleeves and dark photography should not yield a muddy tint.
   if (best_score < 0.06f) return fallback;
 
-  // Keep the album's hue but normalise its brightness. A dark cover otherwise
-  // yields a tint too dim to read against the background, and the point of
-  // sampling is recognisability, not literal fidelity.
+  // Keep the album's hue but normalise brightness: a dark cover otherwise
+  // gives a tint too dim to read. The point is recognisability, not fidelity.
   int r = ((best >> 11) & 0x1F) << 3;
   int g = ((best >> 5) & 0x3F) << 2;
   int b = (best & 0x1F) << 3;

@@ -127,7 +127,7 @@ void NowPlayingScreen::drawArtRegion(const AppState &st) {
   if (drawArt(st.pb.art_path, ART_X, ART_Y, ART_SIZE)) {
     // Tie the visualiser to whatever is actually playing. Sampled from the
     // panel after the decode, so it works for any image the decoder accepted.
-    vis_.setTint(sampleArtTint(ART_X, ART_Y, ART_SIZE, pal.accent));
+    vis_.setTint(sampleArtTint(st.pb.art_path, pal.accent));
   } else {
     // Missing or undecodable artwork must degrade, never blank the device.
     M5.Display.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE, pal.bar_bg);

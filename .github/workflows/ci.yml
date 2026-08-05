@@ -1,0 +1,56 @@
+name: ci
+
+# Runs on Linux, which is deliberate: the emulator's only macOS dependency was
+# sips for image conversion, and nothing in the build or tests needs it. If this
+# ever fails on Linux but passes locally, the project has grown a hidden macOS
+# dependency worth knowing about.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO and SDL2
+        run: |
+          pip install --upgrade platformio
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev
+
+      - name: Unit tests
+        run: pio test -e test
+
+      - name: Build emulator
+        run: pio run -e native
+        env:
+          HOMEBREW_PREFIX: /usr
+
+      - name: Visual regression
+        # No display needed: the emulator renders into an offscreen framebuffer
+        # and dumps it. xvfb only exists because SDL insists on a video device.
+        run: |
+          sudo apt-get install -y xvfb
+          xvfb-run -a python3 tools/visual_tests.py
+
+      - name: Build device firmware
+        run: pio run -e esp32
+
+      - name: Report firmware size
+        run: pio run -e esp32 --target size | tail -20

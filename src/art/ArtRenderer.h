@@ -13,9 +13,11 @@
 // responsible for painting a flat fallback block.
 bool drawArt(const char *path, int x, int y, int size);
 
-// Samples the drawn artwork and returns its most vivid colour, for tinting UI
-// that should feel like it belongs to the current album.
+// Samples the artwork and returns its most vivid colour, for tinting UI that
+// should feel like it belongs to the current album.
 //
-// Reads back from the panel rather than from the JPEG, so it works regardless
-// of how the image was decoded. Note readRect hands back byte-swapped RGB565.
-uint16_t sampleArtTint(int x, int y, int size, uint16_t fallback);
+// Decodes a thumbnail into an off-screen sprite and samples that. It
+// deliberately does NOT read pixels back off the panel: ILI9342C readback is
+// slow over SPI and unreliable on some units, and getting a wrong tint or a
+// stall on every album change would be a miserable first-hardware surprise.
+uint16_t sampleArtTint(const char *path, uint16_t fallback);

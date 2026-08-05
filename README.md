@@ -200,12 +200,19 @@ ESP-IDF VFS, so the same `fopen`/`mkdir` code serves both platforms.
 
 Unknown, honestly. The things most likely to bite, in order:
 
-1. **`sampleArtTint` reads pixels back off the panel.** ILI9342C readback over
-   SPI is slow and unreliable on some units. If the scene tint is wrong or the
-   device stalls on album changes, this is why; the fix is to sample during
-   JPEG decode instead.
-2. **JPEG decode speed and heap headroom.** Only measurable on the board.
-3. **SD card behaviour** at 25MHz — drop the clock if mounts are flaky.
+1. **JPEG decode speed and heap headroom.** Only measurable on the board. The
+   boot banner and periodic `[heap]` lines over serial are there to answer it.
+2. **SD card behaviour** at 25MHz — drop the clock in `Esp32Storage.cpp` if
+   mounts are flaky.
+3. **TLS handshake stack.** The net task has 16KB; if it panics with a stack
+   overflow inside mbedTLS, raise `NET_TASK_STACK`.
+
+The panel-readback risk is gone: `sampleArtTint` now decodes a thumbnail into
+an off-screen sprite and samples that, so the ILI9342C is never read back.
+
+Serial output on boot reports chip, flash, PSRAM, free heap, largest contiguous
+block, SD status and display size, then free heap every 30s — and shouts once if
+it drops below the level where TLS starts failing.
 
 ## Layout
 
