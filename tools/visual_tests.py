@@ -51,15 +51,36 @@ def read_bmp(path):
     return px
 
 
+# M5GFX's SDL backend has an unsynchronised startup race: Panel_sdl::init()
+# does _list_monitor.push_back() on our thread inside M5.begin(), while the SDL
+# thread is already iterating that same std::list in _update_proc(). No mutex
+# guards it. It segfaults roughly 1 run in 80, always during startup.
+#
+# Upstream bug, emulator-only — the device build has no Panel_sdl. Retried once
+# rather than ignored: a crash that reproduces twice for the same config is
+# deterministic and therefore ours, so it still fails the suite. Retries are
+# counted and reported so the flakiness never becomes invisible.
+STARTUP_RACE_RETRIES = 0
+
+
 def run(env_extra, out_bmp):
+    global STARTUP_RACE_RETRIES
     env = dict(os.environ)
     env["EMU_DUMP"] = out_bmp
     env.setdefault("EMU_FAKE", "1")  # never hit the network from a test
     env.update(env_extra)
-    r = subprocess.run([BIN], env=env, capture_output=True, timeout=60)
-    if r.returncode != 0:
-        raise RuntimeError(f"emulator exited {r.returncode}: {r.stderr[:300]}")
-    return read_bmp(out_bmp)
+
+    last = None
+    for attempt in range(2):
+        r = subprocess.run([BIN], env=env, capture_output=True, timeout=60)
+        if r.returncode == 0:
+            if attempt:
+                STARTUP_RACE_RETRIES += 1
+            return read_bmp(out_bmp)
+        last = r
+    raise RuntimeError(
+        f"emulator exited {last.returncode} twice (not the startup race): "
+        f"{last.stderr[:300]}")
 
 
 def region(px, box):
@@ -185,15 +206,38 @@ def unliking_drains_the_heart(tmp):
 
 
 @case
-def visualiser_animates_while_playing(tmp):
-    """It is decorative, but it must actually move."""
+def scene_animates_while_playing(tmp):
+    """Ambient, but it must actually move."""
     a = run({"EMU_EXIT_MS": "1500"}, tmp("vis_a"))
     b = run({"EMU_EXIT_MS": "2100"}, tmp("vis_b"))
-    assert region(a, VIS) != region(b, VIS), "visualiser is static while playing"
+    assert region(a, VIS) != region(b, VIS), "scene is static while playing"
 
 
 @case
-def visualiser_settles_when_paused(tmp):
+def all_four_scenes_render_and_differ(tmp):
+    """Each scene must draw something, and none may look like another."""
+    frames = {}
+    for n in range(4):
+        px = run({"EMU_SCENE": str(n), "EMU_EXIT_MS": "2600"}, tmp(f"scene{n}"))
+        lit = sum(1 for p in region(px, VIS) if sum(p) > 60)
+        assert lit > 40, f"scene {n} rendered almost nothing ({lit} lit pixels)"
+        frames[n] = region(px, VIS)
+
+    for a in range(4):
+        for b in range(a + 1, 4):
+            assert frames[a] != frames[b], f"scenes {a} and {b} render identically"
+
+
+@case
+def scene_rotates_between_tracks(tmp):
+    """A new song should bring a new scene."""
+    a = run({"EMU_TRACK": "0", "EMU_EXIT_MS": "2600"}, tmp("rot0"))
+    b = run({"EMU_TRACK": "1", "EMU_EXIT_MS": "2600"}, tmp("rot1"))
+    assert region(a, VIS) != region(b, VIS), "same scene content across tracks"
+
+
+@case
+def scene_settles_when_paused(tmp):
     """Paused playback must calm the display rather than keep dancing.
 
     Two samples taken well after the pause should be identical, since the bars
@@ -202,14 +246,20 @@ def visualiser_settles_when_paused(tmp):
     common = {"EMU_FIRE": "playpause", "EMU_FIRE_MS": "300"}
     a = run({**common, "EMU_EXIT_MS": "2600"}, tmp("pause_a"))
     b = run({**common, "EMU_EXIT_MS": "3200"}, tmp("pause_b"))
-    assert region(a, VIS) == region(b, VIS), "visualiser still moving while paused"
+    assert region(a, VIS) == region(b, VIS), "scene still moving while paused"
 
 
 @case
-def visualiser_tint_follows_the_album(tmp):
-    """The colour is sampled from the artwork, so two covers must differ."""
-    blue = run({"EMU_TRACK": "0", "EMU_EXIT_MS": "1500"}, tmp("tint0"))
-    green = run({"EMU_TRACK": "3", "EMU_EXIT_MS": "1500"}, tmp("tint3"))
+def scene_tint_follows_the_album(tmp):
+    """Colour is sampled from the artwork, so two covers must differ.
+
+    Both runs pin the same scene, so this isolates the tint rather than
+    accidentally passing because two different scenes were drawn.
+    """
+    blue = run({"EMU_TRACK": "0", "EMU_SCENE": "0", "EMU_EXIT_MS": "1500"},
+               tmp("tint0"))
+    green = run({"EMU_TRACK": "3", "EMU_SCENE": "0", "EMU_EXIT_MS": "1500"},
+                tmp("tint3"))
 
     def dominant(px):
         pixels = [p for p in region(px, VIS) if sum(p) > 120]
@@ -285,6 +335,9 @@ def main():
                 failures.append(name)
 
     print()
+    if STARTUP_RACE_RETRIES:
+        print(f"note: {STARTUP_RACE_RETRIES} run(s) retried after the known "
+              f"M5GFX Panel_sdl startup race (emulator-only, upstream)")
     print(f"{len(CASES) - len(failures)}/{len(CASES)} visual checks passed")
     return 1 if failures else 0
 

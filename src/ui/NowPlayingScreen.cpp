@@ -367,6 +367,8 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
   }
   if (force_ || track_changed) {
     drawTextColumn(st);
+    // A new song gets a new scene.
+    vis_.onTrackChange(st.pb.track_id);
   }
   // Start the heart animation on a real like/unlike, not on the first sight of
   // a track or on saved-state simply becoming known — neither is a user action
@@ -418,7 +420,8 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
   if (force_) {
     vis_.invalidate();
   }
-  vis_.render(st.pb.is_playing, st.pb.volume_pct, now_ms);
+  vis_.render(st.pb.is_playing, st.pb.volume_pct, st.pb.progress_ms,
+              st.pb.duration_ms, now_ms);
 
   if (!force_ && st.pb.is_playing != last_playing_) {
     glyph_anim_active_ = true;

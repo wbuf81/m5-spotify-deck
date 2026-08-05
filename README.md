@@ -80,6 +80,18 @@ distinguishable without relying on colour alone.
 Accented text, which is why the fonts are the Unicode `lgfxJapanGothicP` faces
 rather than Adafruit's ASCII-only FreeSans.
 
+## Known issue: emulator startup crash
+
+M5GFX's SDL backend has an unsynchronised data race. `Panel_sdl::init()` does
+`_list_monitor.push_back()` on the app thread inside `M5.begin()`, while the SDL
+thread is already iterating that same `std::list` in `_update_proc()`. No mutex
+guards it, so roughly 1 launch in 80 segfaults during startup. Relaunch it.
+
+Upstream bug, and **emulator-only** — the device build contains no `Panel_sdl`.
+The visual test harness retries a crashed run once and reports how often that
+happened, so the flakiness stays visible; a crash that reproduces twice still
+fails the suite.
+
 ## Tests
 
 ```sh
@@ -103,25 +115,35 @@ No golden images — they rot whenever a colour or font changes. The checks
 assert properties that should hold regardless ("no amber pixels remain in the
 info row after a toast expires").
 
-## The visualiser
+## Ambient scenes
 
-Decorative, and deliberately not pretending otherwise.
+Four scenes rotate under the song info, one per track. Which one you get is a
+hash of the track ID, skipping whatever played last — so it spreads evenly, a
+song always gets "its" scene, you never see the same one twice running, and the
+tests can assert on it.
+
+| Scene | What it is | What is real |
+|---|---|---|
+| `synthwave` | Mode-7 grid, Outrun sun, stars | Sun sinks as the track plays |
+| `starfield` | Perspective hyperspace streaks | Speed follows real volume |
+| `city` | Neon skyline, flickering windows, parallax | Album-tinted skyglow |
+| `planet` | Banded planet with an orbiting moon | Moon does exactly one orbit per track |
+
+All four are tinted from the album art and freeze when playback pauses.
+
+These replaced a spectrum-bar visualiser, which was a mistake worth recording:
+**bar shapes promise beat-sync no matter how they move.** Smooth motion did not
+help, because the form itself was making the claim.
+
+Beat-sync is not available at any price here. The device never sees the audio,
+the Core Basic has no microphone, and Spotify's `/audio-features` and
+`/audio-analysis` both return **403** for this app tier — verified, not assumed.
+Atmosphere makes no such promise, so it can be honest.
 
 The device never touches the audio stream, the Core Basic has no microphone,
 and Spotify's `/audio-features` and `/audio-analysis` both return **403** for
 this app tier — verified, not assumed. There is no tempo, energy or spectrum
 available at any price, so nothing here can react to the music.
-
-What it does instead is tie everything it *can* to real state:
-
-- **Colour is sampled from the album art**, so it changes with every record
-  (brightness-normalised, so a dark sleeve still yields a readable tint).
-- **Amplitude follows the real volume.**
-- **The bars settle flat when playback actually pauses.**
-
-The motion itself is layered sine waves. A fixed fake BPM was considered and
-rejected: a pulse locked to the wrong tempo reads as broken, while smooth
-motion reads as ambient.
 
 ## Live Spotify
 
