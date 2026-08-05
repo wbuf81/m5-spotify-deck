@@ -95,10 +95,35 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
         pass  # the default handler logs the full query string, code included
 
 
+NO_TTY_MESSAGE = """\
+error: no interactive terminal.
+
+This script must run in a real terminal window (Terminal.app, iTerm, Ghostty),
+NOT inside an agent/CI session. Without a TTY the prompt cannot hide what you
+type, so your client secret would be echoed into whatever is capturing this
+output — a chat transcript, a log file, CI output.
+
+  cd {root}
+  python3 tools/get_refresh_token.py
+
+If you genuinely need it non-interactive, pass the values as environment
+variables instead, and make sure your shell is not recording history:
+
+  SPOTIFY_CLIENT_ID=... SPOTIFY_CLIENT_SECRET=... python3 tools/get_refresh_token.py
+"""
+
+
+def require_tty() -> None:
+    if not sys.stdin.isatty():
+        root = Path(__file__).resolve().parent.parent
+        sys.exit(NO_TTY_MESSAGE.format(root=root))
+
+
 def prompt_secret(env_name: str, label: str) -> str:
     val = os.environ.get(env_name)
     if val:
         return val.strip()
+    require_tty()
     val = getpass.getpass(f"{label} (input hidden): ").strip()
     if not val:
         sys.exit(f"error: {label} is required")
@@ -177,11 +202,14 @@ def main() -> int:
         sys.exit("error: no refresh_token in the response")
 
     print("\nGot a refresh token.")
-    print("WiFi details are only needed for the ESP32 build; press Enter to skip.")
-    wifi_ssid = input("WiFi SSID: ").strip()
-    wifi_password = (
-        getpass.getpass("WiFi password (input hidden): ").strip() if wifi_ssid else ""
-    )
+
+    wifi_ssid = os.environ.get("WIFI_SSID", "").strip()
+    wifi_password = os.environ.get("WIFI_PASSWORD", "").strip()
+    if not wifi_ssid and sys.stdin.isatty():
+        print("WiFi details are only needed for the ESP32 build; Enter to skip.")
+        wifi_ssid = input("WiFi SSID: ").strip()
+        if wifi_ssid:
+            wifi_password = getpass.getpass("WiFi password (input hidden): ").strip()
 
     out = Path(__file__).resolve().parent.parent / "src" / "config" / "secrets.h"
     out.parent.mkdir(parents=True, exist_ok=True)
