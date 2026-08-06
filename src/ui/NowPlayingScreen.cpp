@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "../art/ArtRenderer.h"
+#include "../platform/esp32/Esp32Storage.h"
 #include "TextWrap.h"
 #include "Theme.h"
 #include "TimeFormat.h"
@@ -27,11 +28,20 @@ void NowPlayingScreen::drawArtRegion(const AppState &st) {
     scene_.setTint(sampleArtTint(st.pb.art_path, pal.accent));
   } else {
     // Missing or undecodable artwork must degrade, never blank the device.
+    // Name the actual cause: an absent card looks identical to a decode
+    // failure otherwise, and sends you debugging the wrong thing.
     M5.Display.fillRect(ART_X, ART_Y, ART_SIZE, ART_SIZE, pal.bar_bg);
     M5.Display.setFont(fontSmall());
     M5.Display.setTextColor(pal.dim);
-    M5.Display.setCursor(ART_X + 6, ART_Y + ART_SIZE / 2 - 4);
-    M5.Display.print("no artwork");
+    const bool no_card = !storageAvailable();
+    const char *line1 = no_card ? "no sd card" : "no artwork";
+    const char *line2 = no_card ? "insert one for art" : "";
+    M5.Display.setCursor(ART_X + 8, ART_Y + ART_SIZE / 2 - 10);
+    M5.Display.print(line1);
+    if (line2[0]) {
+      M5.Display.setCursor(ART_X + 8, ART_Y + ART_SIZE / 2 + 4);
+      M5.Display.print(line2);
+    }
     scene_.setTint(pal.accent);
   }
 }

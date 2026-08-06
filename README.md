@@ -198,23 +198,71 @@ overflows the pthread default. Rendering stays on core 1 with the Arduino loop.
 Storage needed no porting: Arduino's SD library mounts at `/sd` through the
 ESP-IDF VFS, so the same `fopen`/`mkdir` code serves both platforms.
 
-### What to expect on first flash
+## First boot
 
-Unknown, honestly. The things most likely to bite, in order:
+### Before you plug it in
 
-1. **JPEG decode speed and heap headroom.** Only measurable on the board. The
-   boot banner and periodic `[heap]` lines over serial are there to answer it.
-2. **SD card behaviour** at 25MHz — drop the clock in `Esp32Storage.cpp` if
-   mounts are flaky.
-3. **TLS handshake stack.** The net task has 16KB; if it panics with a stack
-   overflow inside mbedTLS, raise `NET_TASK_STACK`.
+- **A MicroSD card, FAT32, 16GB or smaller.** Album art is cached on it, and
+  artwork is most of the point. Without one the device runs fine and says
+  `no sd card` in place of the cover. Insert it before powering on.
+- **Your WiFi must have a 2.4GHz band.** The ESP32 cannot see 5GHz at all. If
+  your router publishes one SSID for both bands this usually still works; if
+  5GHz-only, it will sit on `CONNECTING` forever. This is the single most
+  common first-boot failure.
+- **A USB-C data cable.** Charge-only cables are common and will power the
+  device while leaving no serial port to flash.
+- `src/config/secrets.h` must have `WIFI_SSID` and `WIFI_PASSWORD` filled in,
+  not just the Spotify values.
 
-The panel-readback risk is gone: `sampleArtTint` now decodes a thumbnail into
-an off-screen sprite and samples that, so the ILI9342C is never read back.
+### Flash it
 
-Serial output on boot reports chip, flash, PSRAM, free heap, largest contiguous
-block, SD status and display size, then free heap every 30s — and shouts once if
-it drops below the level where TLS starts failing.
+```sh
+pio run -e esp32 -t upload && pio device monitor
+```
+
+If no port is found, check the USB-serial driver — M5Stack Core uses a CP210x
+or CH9102. Recent macOS has both built in; a charge-only cable presents no port
+at all, which looks the same.
+
+### What you should see
+
+```
+=== m5 spotify ===
+chip      : ESP32-D0WDQ6 rev3, 2 core(s) @ 240MHz
+psram     : none (expected)
+heap free : ~250000 bytes
+sd card   : mounted
+==================
+[net] net task started
+[net] wifi connecting to <ssid>
+[net] wifi connected, ip=..., rssi=-xx
+[net] token refresh: HTTP 200
+[net] GET https://api.spotify.com/v1/me/player -> 200
+```
+
+On screen: the `CONNECTING` beacon, then the now-playing layout once something
+is actually playing on Spotify.
+
+### If it misbehaves
+
+| Symptom | Likely cause |
+|---|---|
+| Stuck on `CONNECTING` | 5GHz-only network, or wrong password. Serial shows the retry backoff |
+| `OFFLINE` with a slash | Association failed repeatedly — check `rssi`, the device may be too far |
+| `RE-AUTH` | Refresh token revoked. Re-run `tools/get_refresh_token.py` |
+| `NO DEVICE` | Nothing has an active Spotify session. Start playback anywhere |
+| `no sd card` where art should be | Card absent or not FAT32 |
+| Reboot loop | Watch `[heap]` lines before the reset. A stack overflow inside mbedTLS means raising `NET_TASK_STACK` in `NetWorker.cpp` |
+| Art appears then stalls | JPEG decode too slow. Time it before assuming otherwise |
+| SD mount fails intermittently | Drop the 25MHz clock in `Esp32Storage.cpp` |
+
+### Still unknown until it runs
+
+Everything above is reasoned from datasheets and host measurements. Three
+things genuinely cannot be known until the board is on a desk: **JPEG decode
+speed**, **heap headroom under a live TLS session**, and **SD reliability at
+25MHz**. The boot banner and the 30-second `[heap]` lines exist to answer the
+middle one quickly.
 
 ## Layout
 
