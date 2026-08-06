@@ -457,5 +457,18 @@ __attribute__((weak)) int user_func(bool *running) {
   return 0;
 }
 
-int main(int, char **) { return lgfx::Panel_sdl::main(user_func, 16); }
+int main(int, char **) {
+  // Panel_sdl claims plain keypresses for its own window shortcuts: 1-6 change
+  // the zoom level, and r/l rotate the display 90 degrees by swapping the
+  // window's width and height. Both default to KMOD_NONE, so they fire on an
+  // unmodified press and silently collide with the harness's mode keys — which
+  // is why picking a view also resized the window.
+  //
+  // Moving them behind Ctrl frees the digits and leaves the shortcuts usable:
+  // the library compares the modifier for exact equality, so an unmodified
+  // press can no longer match.
+  lgfx::Panel_sdl::setShortcutKeymod(KMOD_LCTRL);
+
+  return lgfx::Panel_sdl::main(user_func, 16);
+}
 #endif

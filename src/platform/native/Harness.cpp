@@ -82,7 +82,62 @@ void printKeymap() {
       "  Click the window first, or the keys go to your terminal.\n\n");
 }
 
+// EMU_WINCHECK: inject a plain '2' and report the SDL window size either side
+// of it. This is the only way to catch Panel_sdl's built-in shortcuts stealing
+// a key — the framebuffer stays 320x240 no matter what the window does, so no
+// pixel assertion can see it.
+void windowSizeCheck(uint32_t now_ms) {
+  static int phase = 0;
+  static uint32_t t0 = 0;
+  static int w0 = 0, h0 = 0;
+  if (t0 == 0) t0 = now_ms;
+
+  // Panel_sdl keeps its SDL_Window private, and the id is not guaranteed to be
+  // 1, so scan the low ids for it.
+  SDL_Window *win = nullptr;
+  for (Uint32 id = 1; id <= 12 && !win; ++id) win = SDL_GetWindowFromID(id);
+  if (!win) {
+    if (now_ms - t0 > 4000) {
+      std::fprintf(stderr, "[wincheck] no SDL window found; cannot verify\n");
+      std::exit(2);
+    }
+    return;
+  }
+
+  if (phase == 0 && now_ms - t0 > 1200) {
+    SDL_GetWindowSize(win, &w0, &h0);
+    std::fprintf(stderr, "[wincheck] before: %dx%d\n", w0, h0);
+
+    SDL_Event e{};
+    e.type = SDL_KEYDOWN;
+    e.key.type = SDL_KEYDOWN;
+    e.key.state = SDL_PRESSED;
+    // windowID matters: Panel_sdl looks the monitor up by it, and an event
+    // without one is dropped before the shortcut handler ever sees it. The
+    // first version of this probe omitted it and "passed" against the unfixed
+    // build, which is worse than no check at all.
+    e.key.windowID = SDL_GetWindowID(win);
+    // '3', not '2'. On a Retina display the library computes
+    // nw = frame_width * scale * window/renderer, and at scale 2 that lands
+    // back on 320 exactly — the one value where the bug is invisible.
+    e.key.keysym.sym = SDLK_3;
+    e.key.keysym.scancode = SDL_SCANCODE_3;
+    e.key.keysym.mod = KMOD_NONE;
+    SDL_PushEvent(&e);
+    phase = 1;
+  } else if (phase == 1 && now_ms - t0 > 2000) {
+    int w1, h1;
+    SDL_GetWindowSize(win, &w1, &h1);
+    std::fprintf(stderr, "[wincheck] after plain '3': %dx%d  -> %s\n", w1, h1,
+                 (w1 == w0 && h1 == h0) ? "UNCHANGED (ok)" : "RESIZED (bug)");
+    phase = 2;
+    std::exit((w1 == w0 && h1 == h0) ? 0 : 1);
+  }
+}
+
 const Overrides &update(AppState *st, uint32_t now_ms) {
+  if (std::getenv("EMU_WINCHECK")) windowSizeCheck(now_ms);
+
   const Uint8 *ks = SDL_GetKeyboardState(nullptr);
   if (!ks) return g_ov;
 

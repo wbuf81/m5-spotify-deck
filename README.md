@@ -51,6 +51,11 @@ your terminal.
 | `h` | Hide the status bar |
 | `q` | Quit |
 
+`Panel_sdl` binds plain `1`–`6` to window zoom and `r`/`l` to 90-degree
+rotation, with no modifier required. Those collided with the harness keys, so
+picking a view also resized the window. `setShortcutKeymod(KMOD_LCTRL)` moves
+them behind Ctrl — `Ctrl`+`1`–`6` still zooms the window if you want it.
+
 A bar across the top shows the active mode and last action — `~` means
 rotating, `*` means pinned. It deliberately covers the top ten rows of whatever
 is showing; knowing what is pinned matters more than those pixels.

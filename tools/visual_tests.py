@@ -364,6 +364,25 @@ def gameboy_mode_uses_only_dmg_shades(tmp):
 
 
 @case
+def mode_keys_do_not_resize_the_window(tmp):
+    """Panel_sdl binds plain 1-6 to window zoom and r/l to 90-degree rotation,
+    both with no modifier. The harness put view modes on 1-7, so picking a view
+    also resized the window.
+
+    No pixel assertion can catch this: the framebuffer stays 320x240 whatever
+    the window does. So the emulator injects a keypress and reports the real
+    SDL window size either side of it.
+    """
+    env = dict(os.environ)
+    env.update({"EMU_HARNESS": "1", "EMU_FAKE": "1", "EMU_WINCHECK": "1",
+                "EMU_EXIT_MS": "9000"})
+    r = subprocess.run([BIN], env=env, capture_output=True, timeout=60)
+    out = r.stderr.decode(errors="replace")
+    assert "[wincheck]" in out, f"window check did not run: {out[-300:]}"
+    assert "UNCHANGED (ok)" in out, f"a plain keypress resized the window:\n{out}"
+
+
+@case
 def offline_shows_the_status_screen(tmp):
     """Losing the link must show a real screen, not a corner dot."""
     px = run({"EMU_LINK": "offline", "EMU_EXIT_MS": "900"}, tmp("offline"))
