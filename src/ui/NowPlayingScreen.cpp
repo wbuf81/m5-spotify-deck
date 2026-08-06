@@ -35,7 +35,7 @@ void NowPlayingScreen::drawArtRegion(const AppState &st) {
     M5.Display.setTextColor(pal.dim);
     const bool no_card = !storageAvailable();
     const char *line1 = no_card ? "no sd card" : "no artwork";
-    const char *line2 = no_card ? "insert one for art" : "";
+    const char *line2 = no_card ? "fat32 card for art" : "";
     M5.Display.setCursor(ART_X + 8, ART_Y + ART_SIZE / 2 - 10);
     M5.Display.print(line1);
     if (line2[0]) {

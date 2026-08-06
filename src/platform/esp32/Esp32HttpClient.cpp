@@ -16,6 +16,7 @@
 #include <WiFiClientSecure.h>
 
 #include <cstdio>
+#include <cstring>
 
 #include "../../net/HttpClient.h"
 #include "../../net/NetLog.h"
@@ -66,6 +67,17 @@ bool request(const char *method, const std::string &url,
     http.addHeader(name.c_str(), value.c_str());
   }
 
+  // Spotify's control endpoints are PUT/POST with no body, and its frontend
+  // rejects those with 411 Length Required unless Content-Length is present.
+  // HTTPClient only adds the header when there IS a payload, so an empty-bodied
+  // request goes out without it and every button press fails.
+  //
+  // libcurl sets this automatically, which is exactly why the emulator never
+  // showed the problem and only real hardware did.
+  if (body.empty() && std::strcmp(method, "GET") != 0) {
+    http.addHeader("Content-Length", "0");
+  }
+
   // Needed so a 429 can be honoured rather than guessed at.
   const char *collect[] = {"Retry-After"};
   http.collectHeaders(collect, 1);
@@ -103,23 +115,31 @@ bool request(const char *method, const std::string &url,
 }
 
 bool downloadToFile(const std::string &url, const std::string &path) {
+  // Open the destination BEFORE fetching. The first version did the GET first,
+  // so with unusable storage it downloaded ~30KB over TLS every poll and threw
+  // it away — a permanent request storm against Spotify's CDN.
+  const std::string tmp = path + ".part";
+  FILE *f = std::fopen(tmp.c_str(), "wb");
+  if (!f) {
+    NETLOG("cannot open %s for write — skipping download", tmp.c_str());
+    return false;
+  }
+
   HTTPClient http;
   http.setReuse(false);  // the CDN is a different host to the API
   http.setConnectTimeout(10000);
   http.setTimeout(20000);
-  if (!http.begin(tlsClient(), url.c_str())) return false;
+  if (!http.begin(tlsClient(), url.c_str())) {
+    std::fclose(f);
+    std::remove(tmp.c_str());
+    return false;
+  }
 
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
     NETLOG("artwork GET -> %d", code);
-    http.end();
-    return false;
-  }
-
-  const std::string tmp = path + ".part";
-  FILE *f = std::fopen(tmp.c_str(), "wb");
-  if (!f) {
-    NETLOG("cannot open %s for write", tmp.c_str());
+    std::fclose(f);
+    std::remove(tmp.c_str());
     http.end();
     return false;
   }

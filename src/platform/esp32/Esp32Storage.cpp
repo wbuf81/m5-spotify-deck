@@ -21,7 +21,11 @@ bool storageAvailable() { return g_mounted; }
 bool mountStorage() {
   // GPIO4 is the SD chip select on the M5Stack Core.
   if (!SD.begin(GPIO_NUM_4, SPI, 25000000)) {
-    NETLOG("SD mount failed — no artwork cache. Card must be FAT32.");
+    // Distinguish the two causes: the driver logs "no valid FAT volume" when
+    // a card is present but formatted exFAT, which is how most cards over 32GB
+    // ship. Saying "absent" there sends you to check the slot instead of the
+    // format.
+    NETLOG("SD not mounted — card missing, or not FAT32 (exFAT will not work)");
     g_mounted = false;
     return false;
   }

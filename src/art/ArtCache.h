@@ -20,4 +20,9 @@ class ArtCache {
 
  private:
   std::string dir_;
+
+  // Without this, a failing album is retried on every poll — once every two
+  // seconds, forever. Cleared on album change, so a transient failure still
+  // gets another go on the next track.
+  std::string failed_album_;
 };

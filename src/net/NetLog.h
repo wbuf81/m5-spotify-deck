@@ -10,8 +10,17 @@
 #include <cstdlib>
 
 inline bool netDebug() {
+#if defined(EMULATOR)
   static const bool on = std::getenv("SPOTIFY_DEBUG") != nullptr;
   return on;
+#else
+  // On by default on the device. An ESP32 has no environment, so getenv always
+  // returns null there — which meant every one of these lines was silently
+  // suppressed on exactly the platform they were written to diagnose. The
+  // serial log is the only instrument the hardware has; a few UART writes on a
+  // 2s poll cost nothing worth saving.
+  return true;
+#endif
 }
 
 #define NETLOG(...)                        \

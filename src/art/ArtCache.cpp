@@ -6,6 +6,8 @@
 #include <cstdio>
 
 #include "../net/HttpClient.h"
+#include "../net/NetLog.h"
+#include "../platform/esp32/Esp32Storage.h"
 
 namespace {
 
@@ -49,6 +51,20 @@ std::string ArtCache::ensure(const std::string &album_id,
   const std::string path = dir_ + "/" + album_id + ".jpg";
   if (fileExists(path)) return path;
 
-  if (!http::downloadToFile(url, path)) return "";
-  return fileExists(path) ? path : "";
+  // No usable storage: never even open the connection. There is nowhere to put
+  // the result, and attempting anyway is a request per poll for as long as the
+  // device runs.
+  if (!storageAvailable()) return "";
+
+  // Already failed for this album — do not retry until the track changes.
+  if (failed_album_ == album_id) return "";
+
+  if (!http::downloadToFile(url, path) || !fileExists(path)) {
+    NETLOG("artwork unavailable for %s; not retrying until the album changes",
+           album_id.c_str());
+    failed_album_ = album_id;
+    return "";
+  }
+  failed_album_.clear();
+  return path;
 }

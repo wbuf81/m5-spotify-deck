@@ -24,7 +24,8 @@ void bootBanner(bool sd_ok) {
   Serial.printf("heap free : %lu bytes\n", ESP.getFreeHeap());
   Serial.printf("largest   : %lu bytes contiguous\n",
                 heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-  Serial.printf("sd card   : %s\n", sd_ok ? "mounted" : "ABSENT (no artwork cache)");
+  Serial.printf("sd card   : %s\n",
+                sd_ok ? "mounted" : "not mounted (missing, or not FAT32)");
   Serial.printf("display   : %dx%d\n", M5.Display.width(), M5.Display.height());
   Serial.println("==================");
 }
