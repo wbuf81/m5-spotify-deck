@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "../net/NetLog.h"
 #include "Anim.h"
 #include "Theme.h"
 
@@ -62,6 +63,7 @@ M5Canvas *makeSprite(int w, int h) {
   if (!cv->createSprite(w, h)) {
     // Out of contiguous heap. Returning null makes the caller skip drawing,
     // which loses an indicator rather than crashing the device.
+    NETLOG("indicator sprite %dx%d FAILED to allocate", w, h);
     delete cv;
     return nullptr;
   }

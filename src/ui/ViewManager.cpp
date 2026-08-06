@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "../art/ArtRenderer.h"
+#include "../net/NetLog.h"
 #include "Theme.h"
 
 namespace {
@@ -44,6 +45,15 @@ void ViewManager::selectFor(const char *track_id) {
   const uint32_t h = fnv1a(track_id);
   scoreboard_.setTeam(static_cast<int>((h >> 8) % 2));
 
+#if defined(FORCE_VIEW)
+  // Compile-time pin, for testing a single view on hardware where there is no
+  // environment to read EMU_MODE from. -1 is classic, 0..5 the full-screen
+  // modes. Build with: PLATFORMIO_BUILD_FLAGS="-DFORCE_VIEW=-1"
+  current_ = FORCE_VIEW;
+  NETLOG("view: %s (compile-time pin)", currentName());
+  return;
+#endif
+
   if (pinned_ != -2) {
     current_ = pinned_;
     return;
@@ -63,6 +73,7 @@ void ViewManager::selectFor(const char *track_id) {
   int pick = static_cast<int>(h % MODE_COUNT) - 1;
   if (pick == current_) pick = (pick + 2 > MODE_COUNT - 2) ? -1 : pick + 1;
   current_ = pick;
+  NETLOG("view: %s", currentName());
 }
 
 void ViewManager::render(const AppState &st, uint32_t now_ms) {
@@ -89,7 +100,7 @@ void ViewManager::render(const AppState &st, uint32_t now_ms) {
 
   if (current_ < 0) {
     // Classic does its own dirty tracking, so it only needs render().
-    classic_.render(st, now_ms);
+    classic_.render(st, now_ms, tint_);
   } else {
     ViewMode *m = modes_[current_];
     if (!m) return;

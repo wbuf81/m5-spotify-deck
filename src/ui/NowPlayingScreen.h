@@ -18,14 +18,17 @@
 class NowPlayingScreen {
  public:
   void invalidate() { force_ = true; }
-  void render(const AppState &st, uint32_t now_ms);
+  // `tint` is sampled by ViewManager, outside any display transaction. This
+  // screen must not sample it itself: the LCD and SD share one SPI bus on this
+  // board, so reading the card inside startWrite() deadlocks the display.
+  void render(const AppState &st, uint32_t now_ms, uint16_t tint);
 
   // Frees sprite memory while this screen is not showing. The two screens are
   // mutually exclusive, so only one need hold buffers at a time.
   void release();
 
  private:
-  void drawArtRegion(const AppState &st);
+  void drawArtRegion(const AppState &st, uint16_t tint);
   void drawTextColumn(const AppState &st);
   void drawColumnFoot(const AppState &st);
   void drawProgressBar(const AppState &st);

@@ -4,6 +4,7 @@
 #include <M5Unified.h>
 
 #include "../../core/Diag.h"
+#include "Esp32Storage.h"
 
 namespace {
 // An mbedTLS handshake wants tens of KB. Below this, HTTPS starts failing in
@@ -24,8 +25,11 @@ void bootBanner(bool sd_ok) {
   Serial.printf("heap free : %lu bytes\n", ESP.getFreeHeap());
   Serial.printf("largest   : %lu bytes contiguous\n",
                 heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-  Serial.printf("sd card   : %s\n",
-                sd_ok ? "mounted" : "not mounted (missing, or not FAT32)");
+  if (sd_ok) {
+    Serial.printf("sd card   : mounted at %luMHz\n", storageClockHz() / 1000000);
+  } else {
+    Serial.printf("sd card   : not mounted (missing, or not FAT32)\n");
+  }
   Serial.printf("display   : %dx%d\n", M5.Display.width(), M5.Display.height());
   Serial.println("==================");
 }

@@ -122,6 +122,20 @@ void NetWorker::run() {
       mergePlayback(&state_, scratch, source_.polledThisStep(), nowMs());
     }
 
+#if defined(TRACE_RENDER)
+    {
+      static uint32_t win = 0;
+      static uint32_t iters = 0;
+      ++iters;
+      if (win == 0) win = now;
+      if (now - win >= 5000) {
+        NETLOG("net: %.1f iterations/s", iters * 1000.0f / (now - win));
+        iters = 0;
+        win = now;
+      }
+    }
+#endif
+
     napMs(TICK_MS);
   }
 }

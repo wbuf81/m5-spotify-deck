@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "../art/ArtRenderer.h"
+#include "../net/NetLog.h"
 #include "../platform/esp32/Esp32Storage.h"
 #include "TextWrap.h"
 #include "Theme.h"
@@ -21,11 +22,15 @@ void NowPlayingScreen::release() {
   scene_.release();
 }
 
-void NowPlayingScreen::drawArtRegion(const AppState &st) {
+void NowPlayingScreen::drawArtRegion(const AppState &st, uint16_t tint) {
   using namespace theme;
-  if (drawArt(st.pb.art_path, ART_X, ART_Y, ART_SIZE)) {
-    // Tie the scene to whatever is actually playing.
-    scene_.setTint(sampleArtTint(st.pb.art_path, pal.accent));
+  const bool ok = drawArt(st.pb.art_path, ART_X, ART_Y, ART_SIZE);
+  if (ok) {
+    // Tint comes from ViewManager, already sampled outside the transaction.
+    // Sampling it here re-read the card while startWrite() held the shared SPI
+    // bus, which deadlocked the UI thread outright — and decoded the same
+    // 46KB JPEG a second time for nothing.
+    scene_.setTint(tint);
   } else {
     // Missing or undecodable artwork must degrade, never blank the device.
     // Name the actual cause: an absent card looks identical to a decode
@@ -160,7 +165,8 @@ void NowPlayingScreen::drawToastRow(const AppState &st) {
   M5.Display.print(st.toast);
 }
 
-void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
+void NowPlayingScreen::render(const AppState &st, uint32_t now_ms,
+                              uint16_t tint) {
   using namespace theme;
 
   const bool album_changed = std::strcmp(last_album_, st.pb.album_id) != 0;
@@ -178,10 +184,22 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
     scene_.invalidate();
   }
 
-  if (force_ || album_changed) drawArtRegion(st);
+  const bool trace = force_ || track_changed;
+// Stage tracing. Off by default; build with -DTRACE_RENDER to find where a
+// frame stops, which is how the SPI bus deadlock was located.
+#if defined(TRACE_RENDER)
+#define STAGE(name) do { if (trace) NETLOG("classic stage: " name); } while (0)
+#else
+#define STAGE(name) do { (void)trace; } while (0)
+#endif
+
+  if (force_ || album_changed) drawArtRegion(st, tint);
+  STAGE("art done");
   if (force_ || track_changed) {
     drawTextColumn(st);
+    STAGE("text done");
     scene_.onTrackChange(st.pb.track_id);  // a new song gets a new scene
+    STAGE("scene selected");
   }
 
   // Animate only a real like/unlike. Not the first sight of a track, and not
@@ -200,7 +218,9 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
     heart_.render(st.pb.liked_known, st.pb.liked, now_ms);
   }
 
+  STAGE("foot done");
   if (force_ || progress_sec != last_progress_sec_) drawProgressBar(st);
+  STAGE("bar done");
 
   // The toast borrows the whole info row, glyph included, so redraw that row
   // only on a real transition — and restore both halves of it, or the play
@@ -221,8 +241,10 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
 
   // Every frame: continuously animated, and the one element whose whole job is
   // to look alive.
+  STAGE("row done");
   scene_.render(st.pb.is_playing, st.pb.volume_pct, st.pb.progress_ms,
                 st.pb.duration_ms, now_ms);
+  STAGE("scene drawn");
 
   if (!force_ && st.pb.is_playing != last_playing_) {
     glyph_.trigger(st.pb.is_playing, now_ms);
@@ -242,6 +264,8 @@ void NowPlayingScreen::render(const AppState &st, uint32_t now_ms) {
   }
 
   M5.Display.endWrite();
+  STAGE("frame complete");
+#undef STAGE
 
   setStr(last_album_, ID_LEN, st.pb.album_id);
   setStr(last_track_, ID_LEN, st.pb.track_id);

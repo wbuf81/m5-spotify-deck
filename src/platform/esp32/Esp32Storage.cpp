@@ -14,7 +14,10 @@
 
 namespace {
 bool g_mounted = false;
+uint32_t g_hz = 0;
 }
+
+uint32_t storageClockHz() { return g_hz; }
 
 bool storageAvailable() { return g_mounted; }
 
@@ -37,6 +40,7 @@ bool mountStorage() {
                mb);
       }
       g_mounted = true;
+      g_hz = hz;
       return true;
     }
     SD.end();

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "../net/NetLog.h"
 #include "Anim.h"
 #include "Theme.h"
 
@@ -280,6 +281,8 @@ void ScenePanel::ensure() {
     cv_->setColorDepth(16);
     if (!cv_->createSprite(theme::VIS_W, theme::VIS_H)) {
       // Out of contiguous heap: lose the scene rather than the device.
+      NETLOG("scene panel sprite %dx%d FAILED to allocate", theme::VIS_W,
+             theme::VIS_H);
       delete cv_;
       cv_ = nullptr;
     }

@@ -17,6 +17,7 @@
 #include "core/Clock.h"
 #include "art/ArtRenderer.h"
 #include "core/Diag.h"
+#include "net/NetLog.h"
 #include "core/CommandQueue.h"
 #include "input/Buttons.h"
 #include "platform/native/FrameDump.h"
@@ -361,6 +362,22 @@ void loop(void) {
   updateBrightness(now);
 #endif
   heapTick(now);
+
+#if !defined(EMULATOR) && defined(TRACE_RENDER)
+  // Frame rate, because "the screen is not working" and "the screen is
+  // repainting once every few seconds" look identical from across a desk.
+  {
+    static uint32_t win = 0;
+    static uint32_t frames = 0;
+    ++frames;
+    if (win == 0) win = now;
+    if (now - win >= 5000) {
+      NETLOG("ui: %.1f fps", frames * 1000.0f / (now - win));
+      frames = 0;
+      win = now;
+    }
+  }
+#endif
 
   if (g_brightness != theme::BRIGHT_OFF) {
     const bool want_status = StatusScreen::shouldShow(g_state);
