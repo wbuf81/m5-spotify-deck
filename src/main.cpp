@@ -73,6 +73,22 @@ uint32_t dimAfterMs() {
 }
 constexpr uint32_t SLEEP_AFTER_IDLE_MS = 180000;
 
+// A status screen sleeps sooner than paused music does. There is nothing to
+// look at, and a lit CONNECTING beacon sitting on a nightstand all night is
+// exactly the sort of thing that gets a device unplugged and never plugged
+// back in.
+constexpr uint32_t SLEEP_AFTER_STATUS_MS = 45000;
+
+// Playback we can actually vouch for.
+//
+// pb.is_playing alone was keeping the screen awake forever: when the link drops
+// the flag keeps its last value, so if music had been playing it stayed true
+// and reset the idle timer on every frame. The device could never sleep while
+// disconnected — which is the one time it most obviously should.
+bool confirmedPlaying(const AppState &st) {
+  return st.link == LinkStatus::Online && st.pb.has_track && st.pb.is_playing;
+}
+
 }  // namespace
 
 AppState g_state;
@@ -214,9 +230,17 @@ void handleButtons(uint32_t now_ms) {
 
 void updateBrightness(uint32_t now_ms) {
   uint8_t want;
-  const bool idle_long =
-      !g_state.pb.is_playing &&
-      (now_ms - g_not_playing_since_ms) >= SLEEP_AFTER_IDLE_MS;
+  uint32_t sleep_after = StatusScreen::shouldShow(g_state)
+                             ? SLEEP_AFTER_STATUS_MS
+                             : SLEEP_AFTER_IDLE_MS;
+#if defined(EMULATOR)
+  // Overridable so the visual suite can exercise sleep without a 45s test.
+  if (const char *v = std::getenv("EMU_SLEEP_AFTER_MS")) {
+    sleep_after = static_cast<uint32_t>(std::atoi(v));
+  }
+#endif
+  const bool idle_long = !confirmedPlaying(g_state) &&
+                         (now_ms - g_not_playing_since_ms) >= sleep_after;
 
   if ((now_ms - g_last_interaction_ms) < dimAfterMs()) {
     want = theme::BRIGHT_ACTIVE;
@@ -365,7 +389,7 @@ void loop(void) {
     g_state.pb.progress_ms = g_clock.value();
   }
 
-  if (g_state.pb.is_playing) {
+  if (confirmedPlaying(g_state)) {
     g_not_playing_since_ms = now;
   }
 

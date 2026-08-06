@@ -90,6 +90,20 @@ AppState NetWorker::snapshot() {
   return state_;
 }
 
+namespace {
+// Only on a change: a per-iteration log at 40Hz would bury everything else.
+void logLinkChange(LinkStatus s) {
+  static LinkStatus last = LinkStatus::Booting;
+  static bool first = true;
+  if (!first && s == last) return;
+  first = false;
+  last = s;
+  static const char *NAMES[] = {"booting", "connecting", "online",
+                                "offline", "auth-error", "reauth-needed"};
+  NETLOG("link -> %s", NAMES[static_cast<int>(s)]);
+}
+}  // namespace
+
 void NetWorker::run() {
   NETLOG("net task started");
   watchdogSubscribe();
@@ -106,6 +120,7 @@ void NetWorker::run() {
         std::lock_guard<std::mutex> lk(mtx_);
         state_.link = wifi_.status();
       }
+      logLinkChange(wifi_.status());
       napMs(TICK_MS);
       continue;
     }
@@ -126,6 +141,7 @@ void NetWorker::run() {
       std::lock_guard<std::mutex> lk(mtx_);
       mergePlayback(&state_, scratch, source_.polledThisStep(), nowMs());
     }
+    logLinkChange(scratch.link);
 
 #if defined(TRACE_RENDER)
     {

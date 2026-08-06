@@ -100,6 +100,7 @@ nothing playing.
 | `EMU_SCENE=<0-3>` | Pin one ambient scene instead of rotating |
 | `EMU_MODE=<0-6>` | Pin one full-screen view (0 = classic) instead of rotating |
 | `EMU_DIM_AFTER_MS=<ms>` | Shorten the 30s dim timer, so dimming is testable |
+| `EMU_SLEEP_AFTER_MS=<ms>` | Shorten the sleep timer likewise |
 | `EMU_DUMP=<path>` | Write the framebuffer as a 24-bit BMP |
 | `EMU_EXIT_AFTER=<n>` | Quit after *n* frames. Note `loop()` runs as fast as SDL allows, so this is **not** a wall-clock proxy — prefer `EMU_EXIT_MS` when waiting on the network |
 

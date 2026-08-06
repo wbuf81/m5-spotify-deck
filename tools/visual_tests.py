@@ -396,6 +396,25 @@ def mode_keys_do_not_resize_the_window(tmp):
 
 
 @case
+def the_status_screen_eventually_sleeps(tmp):
+    """A lit CONNECTING beacon must not burn all night.
+
+    Regression: the idle timer was reset by pb.is_playing, which keeps its last
+    value when the link drops. If music had been playing, the flag stayed true
+    and the timer reset every frame — so the device could never sleep while
+    disconnected, which is precisely when it should.
+    """
+    lit = run({"EMU_LINK": "offline", "EMU_EXIT_MS": "1200"}, tmp("st_lit"))
+    assert count(lit, (0, 0, 320, 240), is_amber) > 100, "status screen not shown"
+
+    slept = run({"EMU_LINK": "offline", "EMU_DIM_AFTER_MS": "300",
+                 "EMU_SLEEP_AFTER_MS": "800", "EMU_EXIT_MS": "2500"},
+                tmp("st_slept"))
+    lit_px = sum(1 for p in region(slept, (0, 0, 320, 240)) if sum(p) > 60)
+    assert lit_px < 400, f"screen still lit after the sleep timeout ({lit_px} px)"
+
+
+@case
 def offline_shows_the_status_screen(tmp):
     """Losing the link must show a real screen, not a corner dot."""
     px = run({"EMU_LINK": "offline", "EMU_EXIT_MS": "900"}, tmp("offline"))
