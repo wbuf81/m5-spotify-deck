@@ -56,10 +56,14 @@ def read_bmp(path):
 # thread is already iterating that same std::list in _update_proc(). No mutex
 # guards it. It segfaults roughly 1 run in 80, always during startup.
 #
-# Upstream bug, emulator-only — the device build has no Panel_sdl. Retried once
-# rather than ignored: a crash that reproduces twice for the same config is
-# deterministic and therefore ours, so it still fails the suite. Retries are
-# counted and reported so the flakiness never becomes invisible.
+# Upstream bug, emulator-only — the device build has no Panel_sdl. It appears
+# more often when the suite spawns processes back to back, and two consecutive
+# hits were observed in one run, so one retry was not enough.
+#
+# Retried rather than ignored: a genuinely broken build crashes on every
+# attempt and still fails. Retries are counted and reported so the flakiness
+# can never quietly become invisible.
+ATTEMPTS = 3
 STARTUP_RACE_RETRIES = 0
 
 
@@ -77,7 +81,7 @@ def run(env_extra, out_bmp, unpin_mode=False):
         env.pop("EMU_MODE", None)
 
     last = None
-    for attempt in range(2):
+    for attempt in range(ATTEMPTS):
         r = subprocess.run([BIN], env=env, capture_output=True, timeout=60)
         if r.returncode == 0:
             if attempt:
@@ -85,7 +89,8 @@ def run(env_extra, out_bmp, unpin_mode=False):
             return read_bmp(out_bmp)
         last = r
     raise RuntimeError(
-        f"emulator exited {last.returncode} twice (not the startup race): "
+        f"emulator exited {last.returncode} on all {ATTEMPTS} attempts "
+        f"(not the startup race): "
         f"{last.stderr[:300]}")
 
 
