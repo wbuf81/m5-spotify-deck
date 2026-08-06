@@ -29,7 +29,7 @@ bool WifiLink::ensureConnected(uint32_t now_ms) {
   }
 
   if (attempting_) {
-    if ((now_ms - attempt_started_ms_) < WIFI_ATTEMPT_TIMEOUT_MS) {
+    if (attempt_.pending(now_ms)) {
       status_ = LinkStatus::Connecting;
       return false;
     }
@@ -41,13 +41,13 @@ bool WifiLink::ensureConnected(uint32_t now_ms) {
                       : (backoff_ms_ * 2 > WIFI_BACKOFF_MAX_MS
                              ? WIFI_BACKOFF_MAX_MS
                              : backoff_ms_ * 2);
-    retry_at_ms_ = now_ms + backoff_ms_;
+    retry_.arm(now_ms, backoff_ms_);
     status_ = LinkStatus::Offline;
     NETLOG("wifi attempt timed out, retrying in %ums", backoff_ms_);
     return false;
   }
 
-  if (retry_at_ms_ != 0 && now_ms < retry_at_ms_) {
+  if (retry_.pending(now_ms)) {
     status_ = LinkStatus::Offline;
     return false;
   }
@@ -55,7 +55,7 @@ bool WifiLink::ensureConnected(uint32_t now_ms) {
   NETLOG("wifi connecting to %s", ssid_ ? ssid_ : "(unset)");
   WiFi.begin(ssid_, password_);
   attempting_ = true;
-  attempt_started_ms_ = now_ms;
+  attempt_.arm(now_ms, WIFI_ATTEMPT_TIMEOUT_MS);
   status_ = LinkStatus::Connecting;
   return false;
 }

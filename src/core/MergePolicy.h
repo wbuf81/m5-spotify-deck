@@ -19,10 +19,11 @@ inline void mergePlayback(AppState *dst, const AppState &src, bool polled,
   dst->link = src.link;
 
   // A toast from the source wins only if it outlives whatever is already
-  // showing, so a stale message cannot clobber a fresher one.
-  if (src.toast_until_ms > dst->toast_until_ms) {
+  // showing, so a stale message cannot clobber a fresher one. Compared by time
+  // remaining rather than by absolute expiry, which would invert at the wrap.
+  if (src.toast_for.remainingMs(now_ms) > dst->toast_for.remainingMs(now_ms)) {
     setStr(dst->toast, sizeof(dst->toast), src.toast);
-    dst->toast_until_ms = src.toast_until_ms;
+    dst->toast_for = src.toast_for;
   }
 
   // Without a fresh poll the source's copy is a stale snapshot; merging it
@@ -44,13 +45,13 @@ inline void mergePlayback(AppState *dst, const AppState &src, bool polled,
   // Settle windows: a field the user just changed optimistically is left alone
   // until the window expires, so a response already in flight cannot snap it
   // back and make the device look broken.
-  if (now_ms >= dst->settle_playing_until_ms) {
+  if (dst->settle_playing.elapsed(now_ms)) {
     dst->pb.is_playing = src.pb.is_playing;
   }
-  if (now_ms >= dst->settle_volume_until_ms) {
+  if (dst->settle_volume.elapsed(now_ms)) {
     dst->pb.volume_pct = src.pb.volume_pct;
   }
-  if (now_ms >= dst->settle_liked_until_ms) {
+  if (dst->settle_liked.elapsed(now_ms)) {
     dst->pb.liked = src.pb.liked;
   }
 

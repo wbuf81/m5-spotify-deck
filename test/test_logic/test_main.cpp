@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "core/CommandQueue.h"
+#include "core/Deadline.h"
 #include "core/MergePolicy.h"
 #include "core/ProgressClock.h"
 #include "input/ButtonLogic.h"
@@ -148,6 +149,50 @@ void test_clock_clamps_at_duration(void) {
 }
 
 // ---------------------------------------------------------------------------
+// Deadline  (regression: the 49.7-day millis() wrap)
+// ---------------------------------------------------------------------------
+
+void test_deadline_basic_timing(void) {
+  Deadline d;
+  TEST_ASSERT_TRUE(d.elapsed(1000));  // never armed
+  d.arm(1000, 500);
+  TEST_ASSERT_TRUE(d.pending(1100));
+  TEST_ASSERT_TRUE(d.pending(1499));
+  TEST_ASSERT_TRUE(d.elapsed(1500));
+  TEST_ASSERT_TRUE(d.elapsed(9999));
+}
+
+void test_deadline_survives_the_millis_wrap(void) {
+  // Armed 100ms before the counter wraps. The absolute form this replaced
+  // compared now < start+duration, which after the wrap is 5 < 4294967395
+  // truncated to 99 — and then stayed pending forever, freezing the device.
+  const uint32_t near_max = 0xFFFFFF9C;  // 100ms short of wrapping
+  Deadline d;
+  d.arm(near_max, 500);
+
+  TEST_ASSERT_TRUE(d.pending(near_max + 50));   // still before the wrap
+  TEST_ASSERT_TRUE(d.pending(50));              // wrapped, 150ms elapsed
+  TEST_ASSERT_TRUE(d.pending(399));             // wrapped, 499ms elapsed
+  TEST_ASSERT_TRUE(d.elapsed(400));             // wrapped, 500ms elapsed
+  TEST_ASSERT_TRUE(d.elapsed(100000));          // and stays elapsed
+}
+
+void test_deadline_elapsed_ms_is_correct_across_the_wrap(void) {
+  Deadline d;
+  d.arm(0xFFFFFF9C, 500);
+  TEST_ASSERT_EQUAL_UINT32(150, d.elapsedMs(50));
+}
+
+void test_deadline_disarm(void) {
+  Deadline d;
+  d.arm(1000, 500);
+  TEST_ASSERT_TRUE(d.pending(1100));
+  d.disarm();
+  TEST_ASSERT_FALSE(d.pending(1100));
+  TEST_ASSERT_TRUE(d.elapsed(1100));
+}
+
+// ---------------------------------------------------------------------------
 // TimeFormat
 // ---------------------------------------------------------------------------
 
@@ -213,7 +258,7 @@ void test_settle_window_protects_an_optimistic_flip(void) {
   // already in flight snaps it back and the device looks broken.
   AppState dst;
   dst.pb.is_playing = false;          // user just paused, optimistically
-  dst.settle_playing_until_ms = 1500;
+  dst.settle_playing.arm(0, 1500);
 
   AppState src = makeSource("t1", true, 50, false, true);  // remote still playing
   mergePlayback(&dst, src, true, /*now=*/500);
@@ -227,9 +272,9 @@ void test_settle_window_protects_an_optimistic_flip(void) {
 void test_settle_windows_are_independent(void) {
   AppState dst;
   dst.pb.volume_pct = 80;
-  dst.settle_volume_until_ms = 2000;
+  dst.settle_volume.arm(0, 2000);
   dst.pb.is_playing = false;
-  dst.settle_playing_until_ms = 0;  // not protected
+  // not protected
 
   AppState src = makeSource("t1", true, 20, false, true);
   mergePlayback(&dst, src, true, 500);
@@ -315,6 +360,11 @@ int main(void) {
   RUN_TEST(test_clock_resyncs_only_on_a_new_publish);
   RUN_TEST(test_clock_does_not_advance_while_paused);
   RUN_TEST(test_clock_clamps_at_duration);
+
+  RUN_TEST(test_deadline_basic_timing);
+  RUN_TEST(test_deadline_survives_the_millis_wrap);
+  RUN_TEST(test_deadline_elapsed_ms_is_correct_across_the_wrap);
+  RUN_TEST(test_deadline_disarm);
 
   RUN_TEST(test_elapsed_formatting);
   RUN_TEST(test_remaining_counts_down);

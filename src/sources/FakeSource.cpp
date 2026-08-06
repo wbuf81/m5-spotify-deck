@@ -114,13 +114,13 @@ void FakeSource::publish(AppState *st, uint32_t now_ms) {
   // Settle windows: a field the user just changed optimistically is left alone
   // until the window expires, so a response already in flight cannot snap it
   // back and make the device look broken.
-  if (now_ms >= st->settle_playing_until_ms) {
+  if (st->settle_playing.elapsed(now_ms)) {
     st->pb.is_playing = remote_.is_playing;
   }
-  if (now_ms >= st->settle_volume_until_ms) {
+  if (st->settle_volume.elapsed(now_ms)) {
     st->pb.volume_pct = remote_.volume_pct;
   }
-  if (now_ms >= st->settle_liked_until_ms) {
+  if (st->settle_liked.elapsed(now_ms)) {
     st->pb.liked = remote_.liked;
   }
   st->pb.liked_known = remote_.liked_known;

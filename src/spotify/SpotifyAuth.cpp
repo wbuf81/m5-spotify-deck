@@ -75,12 +75,11 @@ SpotifyAuth::SpotifyAuth(const char *client_id, const char *client_secret,
       refresh_token_(refresh_token ? refresh_token : "") {}
 
 bool SpotifyAuth::ensureFresh(uint32_t now_ms) {
-  if (!access_token_.empty() && now_ms + REFRESH_MARGIN_MS < expires_at_ms_) {
-    return true;
-  }
-  if (retry_after_ms_ != 0 && now_ms < retry_after_ms_) {
-    return false;
-  }
+  // Refresh proactively, a margin before expiry. Expressed as elapsed time so
+  // it cannot invert at the millis() wrap — the absolute form would have kept
+  // reporting the token as valid forever after 49.7 days.
+  if (!access_token_.empty() && valid_for_.pending(now_ms)) return true;
+  if (retry_after_.pending(now_ms)) return false;
 
   const std::string body = "grant_type=refresh_token&refresh_token=" +
                            formEncode(refresh_token_);
@@ -97,7 +96,7 @@ bool SpotifyAuth::ensureFresh(uint32_t now_ms) {
     ++consecutive_failures_;
     status_ = consecutive_failures_ >= 3 ? LinkStatus::AuthError
                                          : LinkStatus::Connecting;
-    retry_after_ms_ = now_ms + RETRY_BACKOFF_MS;
+    retry_after_.arm(now_ms, RETRY_BACKOFF_MS);
     return false;
   }
 
@@ -111,7 +110,7 @@ bool SpotifyAuth::ensureFresh(uint32_t now_ms) {
     // invalid_grant: the refresh token was revoked. This is terminal — retry
     // rarely and tell the user to re-authorise rather than spinning.
     status_ = LinkStatus::ReauthNeeded;
-    retry_after_ms_ = now_ms + REAUTH_RETRY_MS;
+    retry_after_.arm(now_ms, REAUTH_RETRY_MS);
     return false;
   }
 
@@ -119,29 +118,32 @@ bool SpotifyAuth::ensureFresh(uint32_t now_ms) {
     ++consecutive_failures_;
     status_ = consecutive_failures_ >= 3 ? LinkStatus::AuthError
                                          : LinkStatus::Connecting;
-    retry_after_ms_ = now_ms + RETRY_BACKOFF_MS;
+    retry_after_.arm(now_ms, RETRY_BACKOFF_MS);
     return false;
   }
 
   JsonDocument doc;
   if (deserializeJson(doc, resp.body) != DeserializationError::Ok) {
     ++consecutive_failures_;
-    retry_after_ms_ = now_ms + RETRY_BACKOFF_MS;
+    retry_after_.arm(now_ms, RETRY_BACKOFF_MS);
     return false;
   }
 
   const char *tok = doc["access_token"];
   if (!tok) {
     ++consecutive_failures_;
-    retry_after_ms_ = now_ms + RETRY_BACKOFF_MS;
+    retry_after_.arm(now_ms, RETRY_BACKOFF_MS);
     return false;
   }
 
   access_token_ = tok;
   const uint32_t expires_in = doc["expires_in"] | 3600;
-  expires_at_ms_ = now_ms + (expires_in * 1000);
+  const uint32_t lifetime_ms = expires_in * 1000;
+  valid_for_.arm(now_ms, lifetime_ms > REFRESH_MARGIN_MS
+                             ? lifetime_ms - REFRESH_MARGIN_MS
+                             : lifetime_ms / 2);
   consecutive_failures_ = 0;
-  retry_after_ms_ = 0;
+  retry_after_.disarm();
   status_ = LinkStatus::Online;
 
   // Scope list is not sensitive, and a missing scope is the usual cause of an

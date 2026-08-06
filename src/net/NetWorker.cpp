@@ -1,6 +1,7 @@
 #include "NetWorker.h"
 
 #include "../core/Clock.h"
+#include "../core/Diag.h"
 #include "../core/MergePolicy.h"
 #include "NetLog.h"
 
@@ -91,9 +92,11 @@ AppState NetWorker::snapshot() {
 
 void NetWorker::run() {
   NETLOG("net task started");
+  watchdogSubscribe();
   wifi_.begin(ssid_, password_);
 
   while (running_) {
+    watchdogFeed();
     const uint32_t now = nowMs();
 
     if (!wifi_.ensureConnected(now)) {

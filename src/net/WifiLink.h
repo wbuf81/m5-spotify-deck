@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #include "../core/AppState.h"
+#include "../core/Deadline.h"
 
 class WifiLink {
  public:
@@ -24,8 +25,8 @@ class WifiLink {
   const char *password_ = nullptr;
 
   bool attempting_ = false;
-  uint32_t attempt_started_ms_ = 0;
-  uint32_t retry_at_ms_ = 0;
+  Deadline attempt_;
+  Deadline retry_;
   uint32_t backoff_ms_ = 0;
   LinkStatus status_ = LinkStatus::Booting;
 };

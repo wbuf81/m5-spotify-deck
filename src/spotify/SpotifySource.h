@@ -14,6 +14,7 @@
 
 #include "../art/ArtCache.h"
 #include "../core/AppState.h"
+#include "../core/Deadline.h"
 #include "../core/CommandQueue.h"
 #include "../net/HttpClient.h"
 #include "SpotifyAuth.h"
@@ -48,16 +49,15 @@ class SpotifySource {
   ArtCache art_;
 
   std::string last_liked_track_;
-  uint32_t next_poll_ms_ = 0;
-  uint32_t rate_limited_until_ms_ = 0;
+  Deadline next_poll_;
+  Deadline rate_limited_;
   bool polled_ = false;
 
   // After a skip, poll rapidly until the track actually changes rather than
   // waiting a fixed delay and hoping. Spotify needs a moment to settle, and
   // that moment varies.
   std::string confirm_track_;
-  uint32_t confirm_until_ms_ = 0;
-  uint32_t confirm_started_ms_ = 0;
+  Deadline confirm_;
   unsigned confirm_polls_ = 0;
 
   // The saved-state check is a whole extra round trip. Running it in the same

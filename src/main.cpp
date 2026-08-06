@@ -135,7 +135,7 @@ void nudgeVolume(int delta, uint32_t now_ms) {
     if (v < 0) v = 0;
     if (v > 100) v = 100;
     st.pb.volume_pct = v;
-    st.settle_volume_until_ms = now_ms + SETTLE_MS;
+    st.settle_volume.arm(now_ms, SETTLE_MS);
   });
 
   if (unsupported) {
@@ -187,7 +187,7 @@ void handleButtons(uint32_t now_ms) {
     // Optimistic: flip locally so the glyph responds before the network does.
     mutateState([&](AppState &st) {
       st.pb.is_playing = !st.pb.is_playing;
-      st.settle_playing_until_ms = now_ms + SETTLE_MS;
+      st.settle_playing.arm(now_ms, SETTLE_MS);
     });
     submit({CommandType::PlayPause, 0});
   } else if (b == BtnEvent::LongStart) {
@@ -196,7 +196,7 @@ void handleButtons(uint32_t now_ms) {
       st.pb.liked = !st.pb.liked;
       // We just set it, so we know it even if the API will not tell us.
       st.pb.liked_known = true;
-      st.settle_liked_until_ms = now_ms + SETTLE_MS;
+      st.settle_liked.arm(now_ms, SETTLE_MS);
       st.showToast(st.pb.liked ? "Saved to Liked Songs" : "Removed from Liked",
                    now_ms);
     });
@@ -274,6 +274,8 @@ void setup(void) {
   // POSIX file code serves both platforms.
   const bool sd_ok = mountStorage();
   bootBanner(sd_ok);
+  watchdogBegin();
+  watchdogSubscribe();
   const char *cache_dir = "/sd/art";
 #endif
   if (!force_fake) {
@@ -390,6 +392,7 @@ void loop(void) {
   updateBrightness(now);
 #endif
   heapTick(now);
+  watchdogFeed();
 
 #if !defined(EMULATOR) && defined(TRACE_RENDER)
   // Frame rate, because "the screen is not working" and "the screen is
@@ -451,7 +454,7 @@ void loop(void) {
       if (std::strcmp(what, "playpause") == 0) {
         mutateState([&](AppState &st) {
           st.pb.is_playing = !st.pb.is_playing;
-          st.settle_playing_until_ms = now + SETTLE_MS;
+          st.settle_playing.arm(now, SETTLE_MS);
         });
         submit({CommandType::PlayPause, 0});
       } else {
@@ -461,7 +464,7 @@ void loop(void) {
           changed = (st.pb.liked != want) || !st.pb.liked_known;
           st.pb.liked = want;
           st.pb.liked_known = true;
-          st.settle_liked_until_ms = now + SETTLE_MS;
+          st.settle_liked.arm(now, SETTLE_MS);
         });
         if (changed) submit({CommandType::ToggleLike, 0});
       }

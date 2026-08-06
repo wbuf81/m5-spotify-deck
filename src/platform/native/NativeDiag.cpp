@@ -8,5 +8,9 @@
 
 void bootBanner(bool) {}
 void heapTick(uint32_t) {}
+void watchdogBegin() {}
+void watchdogSubscribe() {}
+void watchdogFeed() {}
+uint32_t crashStreak() { return 0; }
 
 #endif  // EMULATOR

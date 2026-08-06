@@ -11,6 +11,7 @@
 #include <string>
 
 #include "../core/AppState.h"
+#include "../core/Deadline.h"
 
 class SpotifyAuth {
  public:
@@ -21,7 +22,7 @@ class SpotifyAuth {
   bool ensureFresh(uint32_t now_ms);
 
   // Forces a refresh on the next ensureFresh(). Called after a 401.
-  void invalidate() { expires_at_ms_ = 0; }
+  void invalidate() { valid_for_.disarm(); }
 
   const std::string &token() const { return access_token_; }
   LinkStatus status() const { return status_; }
@@ -32,8 +33,8 @@ class SpotifyAuth {
   std::string refresh_token_;
   std::string access_token_;
 
-  uint32_t expires_at_ms_ = 0;
-  uint32_t retry_after_ms_ = 0;
+  Deadline valid_for_;
+  Deadline retry_after_;
   int consecutive_failures_ = 0;
   LinkStatus status_ = LinkStatus::Booting;
 };

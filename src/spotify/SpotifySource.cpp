@@ -117,7 +117,7 @@ bool SpotifySource::call(const char *method, const std::string &url,
 
   if (resp->status == 429) {
     const long wait = resp->retry_after_s > 0 ? resp->retry_after_s : 5;
-    rate_limited_until_ms_ = now_ms + static_cast<uint32_t>(wait) * 1000;
+    rate_limited_.arm(now_ms, static_cast<uint32_t>(wait) * 1000);
     out->showToast("Rate limited", now_ms, 3000);
     return false;
   }
@@ -191,15 +191,14 @@ void SpotifySource::runCommand(const Command &c, AppState *out,
       // largest single contributor to skip latency: too short and the poll
       // returns the old track, too long and the screen just sits there.
       confirm_track_ = out->pb.track_id;
-      confirm_started_ms_ = now_ms;
       confirm_polls_ = 0;
       // Spotify Connect can take a while to reflect a skip when playback lives
       // on another device, so allow longer than feels reasonable before giving
       // up and falling back to the normal cadence.
-      confirm_until_ms_ = now_ms + 8000;
-      next_poll_ms_ = now_ms + 120;
+      confirm_.arm(now_ms, 8000);
+      next_poll_.arm(now_ms, 120);
     } else {
-      next_poll_ms_ = now_ms + 250;
+      next_poll_.arm(now_ms, 250);
     }
   }
 }
@@ -219,11 +218,11 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
     out->pb.has_track = false;
     out->pb.is_playing = false;
     polled_ = true;
-    next_poll_ms_ = now_ms + POLL_PAUSED_MS;
+    next_poll_.arm(now_ms, POLL_PAUSED_MS);
     return;
   }
   if (resp.status != 200) {
-    next_poll_ms_ = now_ms + POLL_PAUSED_MS;
+    next_poll_.arm(now_ms, POLL_PAUSED_MS);
     return;
   }
 
@@ -235,7 +234,7 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
       doc, resp.body, DeserializationOption::Filter(filter));
   if (err) {
     out->showToast("Bad response", now_ms);
-    next_poll_ms_ = now_ms + POLL_PAUSED_MS;
+    next_poll_.arm(now_ms, POLL_PAUSED_MS);
     return;
   }
 
@@ -243,7 +242,7 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
   if (item.isNull()) {
     // A valid response can omit item while the player transitions.
     out->pb.has_track = false;
-    next_poll_ms_ = now_ms + POLL_PAUSED_MS;
+    next_poll_.arm(now_ms, POLL_PAUSED_MS);
     return;
   }
 
@@ -289,18 +288,17 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
   polled_ = true;
 
   // Still chasing a skip: keep polling fast until the track really changes.
-  if (confirm_until_ms_ != 0) {
+  if (confirm_.armed()) {
     const bool changed = confirm_track_ != out->pb.track_id;
     ++confirm_polls_;
-    if (changed || now_ms >= confirm_until_ms_) {
+    if (changed || confirm_.elapsed(now_ms)) {
       NETLOG("skip confirmed after %u polls, %ums%s", confirm_polls_,
-             (unsigned)(now_ms - confirm_started_ms_),
-             changed ? "" : " (GAVE UP)");
-      confirm_until_ms_ = 0;
+             (unsigned)confirm_.elapsedMs(now_ms), changed ? "" : " (GAVE UP)");
+      confirm_.disarm();
       confirm_polls_ = 0;
       confirm_track_.clear();
     } else {
-      next_poll_ms_ = now_ms + 120;
+      next_poll_.arm(now_ms, 120);
       return;
     }
   }
@@ -314,8 +312,8 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
     }
   }
 
-  next_poll_ms_ =
-      now_ms + (out->pb.is_playing ? POLL_PLAYING_MS : POLL_PAUSED_MS);
+  next_poll_.arm(now_ms,
+                 out->pb.is_playing ? POLL_PLAYING_MS : POLL_PAUSED_MS);
 }
 
 void SpotifySource::refreshLiked(AppState *out, uint32_t now_ms) {
@@ -439,9 +437,9 @@ void SpotifySource::step(AppState *out, CommandQueue<> *cmds, uint32_t now_ms) {
     }
   }
 
-  if (rate_limited_until_ms_ != 0) {
-    if (now_ms < rate_limited_until_ms_) return;
-    rate_limited_until_ms_ = 0;
+  if (rate_limited_.armed()) {
+    if (rate_limited_.pending(now_ms)) return;
+    rate_limited_.disarm();
   }
 
   Command c;
@@ -449,7 +447,7 @@ void SpotifySource::step(AppState *out, CommandQueue<> *cmds, uint32_t now_ms) {
     runCommand(c, out, now_ms);
   }
 
-  if (now_ms < next_poll_ms_) {
+  if (next_poll_.pending(now_ms)) {
     // Between polls is exactly when there is time for the saved-state check.
     // Doing it immediately after the poll delayed the new track reaching the
     // screen by a whole extra round trip, because the caller only merges once

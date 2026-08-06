@@ -190,7 +190,7 @@ const Overrides &update(AppState *st, uint32_t now_ms) {
   if (justPressed(ks, SDL_SCANCODE_F)) {
     st->pb.liked = !st->pb.liked;
     st->pb.liked_known = true;
-    st->settle_liked_until_ms = now_ms + 1500;
+    st->settle_liked.arm(now_ms, 1500);
     harnessSubmit({CommandType::ToggleLike, 0});
     note(st->pb.liked ? "liked" : "unliked");
   }
@@ -198,7 +198,7 @@ const Overrides &update(AppState *st, uint32_t now_ms) {
     const int d = ks[SDL_SCANCODE_B] ? 5 : -5;
     int v = (st->pb.volume_pct < 0 ? 50 : st->pb.volume_pct) + d;
     st->pb.volume_pct = v < 0 ? 0 : (v > 100 ? 100 : v);
-    st->settle_volume_until_ms = now_ms + 1500;
+    st->settle_volume.arm(now_ms, 1500);
     note("volume %d%%", st->pb.volume_pct);
   }
   if (justPressed(ks, SDL_SCANCODE_T)) {
