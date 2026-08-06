@@ -56,6 +56,11 @@ bool decodeInto(LovyanGFX *dst, const char *path, int x, int y, int size) {
 
 }  // namespace
 
+bool drawArtInto(LovyanGFX *dst, const char *path, int x, int y, int size) {
+  if (!dst || !path || path[0] == '\0') return false;
+  return decodeInto(dst, path, x, y, size);
+}
+
 bool drawArt(const char *path, int x, int y, int size) {
   if (!path || path[0] == '\0') return false;
 

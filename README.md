@@ -52,6 +52,7 @@ nothing playing.
 | `EMU_FIRE_MS=<ms>` | When `EMU_FIRE` triggers (default 500) |
 | `EMU_LINK=<connecting\|offline\|autherror\|reauth\|notrack>` | Force a link state to inspect the status screen |
 | `EMU_SCENE=<0-3>` | Pin one ambient scene instead of rotating |
+| `EMU_MODE=<0-6>` | Pin one full-screen view (0 = classic) instead of rotating |
 | `EMU_DIM_AFTER_MS=<ms>` | Shorten the 30s dim timer, so dimming is testable |
 | `EMU_DUMP=<path>` | Write the framebuffer as a 24-bit BMP |
 | `EMU_EXIT_AFTER=<n>` | Quit after *n* frames. Note `loop()` runs as fast as SDL allows, so this is **not** a wall-clock proxy — prefer `EMU_EXIT_MS` when waiting on the network |
@@ -116,6 +117,30 @@ two-second steps. Each of those now has a test named after the symptom.
 No golden images — they rot whenever a colour or font changes. The checks
 assert properties that should hold regardless ("no amber pixels remain in the
 info row after a toast expires").
+
+## View modes
+
+Seven full-screen presentations rotate, one per track, chosen the same way the
+ambient scenes are: hashed from the track ID, skipping whatever played last.
+
+| Mode | What it is | What is real |
+|---|---|---|
+| `classic` | Artwork, text column, ambient scene panel | everything below |
+| `pixel` | Cover posterized to 8px cells in an RGB332 palette | the cover itself |
+| `gameboy` | Four DMG greens, ordered-dithered | luminance of the cover |
+| `cassette` | Tape deck whose reels transfer | reel radius **is** the progress |
+| `scoreboard` | Stadium LED board, Gators or Jaguars palette | elapsed as a game clock |
+| `cyberdeck` | Phosphor terminal with scanlines | most legible of the set |
+| `synthwave` | Mode-7 horizon, cover masked into the sun | the sun sinks with progress |
+
+Modes cannot composite off-screen — a 320×240 RGB565 buffer is 150KB and this
+board has no PSRAM — so each draws straight to the panel and splits into
+`enter()` (repaint on track change) and `tick()` (only the moving parts). A full
+blit costs ~30ms over SPI, which would otherwise cap the frame rate and
+saturate the bus.
+
+Scoreboard uses team colours and a generic board rather than club marks: logos
+at this resolution read as mush, and the palette carries the association anyway.
 
 ## Ambient scenes
 

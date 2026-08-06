@@ -21,8 +21,8 @@
 #include "platform/native/FrameDump.h"
 #include "sources/FakeSource.h"
 #include "core/ProgressClock.h"
-#include "ui/NowPlayingScreen.h"
 #include "ui/StatusScreen.h"
+#include "ui/ViewManager.h"
 #include "ui/Theme.h"
 
 #if defined(EMULATOR)
@@ -70,7 +70,7 @@ constexpr uint32_t SLEEP_AFTER_IDLE_MS = 180000;
 AppState g_state;
 CommandQueue<> g_cmds;
 FakeSource g_fake;
-NowPlayingScreen g_screen;
+ViewManager g_screen;
 StatusScreen g_status;
 bool g_showing_status = false;
 Buttons g_buttons;

@@ -63,12 +63,18 @@ def read_bmp(path):
 STARTUP_RACE_RETRIES = 0
 
 
-def run(env_extra, out_bmp):
+def run(env_extra, out_bmp, unpin_mode=False):
     global STARTUP_RACE_RETRIES
     env = dict(os.environ)
     env["EMU_DUMP"] = out_bmp
     env.setdefault("EMU_FAKE", "1")  # never hit the network from a test
+    # Pin the classic view unless a test asks otherwise. Modes rotate per track,
+    # so without this every layout assertion below would be testing whichever
+    # mode the fixture happened to hash to.
+    env.setdefault("EMU_MODE", "0")
     env.update(env_extra)
+    if unpin_mode:
+        env.pop("EMU_MODE", None)
 
     last = None
     for attempt in range(2):
@@ -306,6 +312,50 @@ def dimming_darkens_artwork_as_well_as_text(tmp):
     assert abs(art_ratio - text_ratio) < 0.25, (
         f"artwork and text dim by different amounts "
         f"({art_ratio:.2f} vs {text_ratio:.2f})")
+
+
+MODE_NAMES = ["classic", "pixel", "gameboy", "cassette", "scoreboard",
+              "cyberdeck", "synthwave"]
+
+
+@case
+def every_view_mode_renders_something_distinct(tmp):
+    """All seven modes must draw, and none may be mistakable for another."""
+    frames = {}
+    for n, name in enumerate(MODE_NAMES):
+        px = run({"EMU_MODE": str(n), "EMU_EXIT_MS": "2600"}, tmp(f"mode{n}"))
+        lit = sum(1 for p in region(px, (0, 0, 320, 240)) if sum(p) > 90)
+        assert lit > 2000, f"mode {name} rendered almost nothing ({lit} lit px)"
+        frames[name] = region(px, (0, 0, 320, 240))
+
+    for i, a in enumerate(MODE_NAMES):
+        for b in MODE_NAMES[i + 1:]:
+            assert frames[a] != frames[b], f"{a} and {b} render identically"
+
+
+@case
+def view_mode_rotates_between_tracks(tmp):
+    """A new song should bring a new view."""
+    seen = set()
+    for track in range(5):
+        px = run({"EMU_TRACK": str(track), "EMU_EXIT_MS": "2000"},
+                 tmp(f"rot{track}"), unpin_mode=True)
+        seen.add(tuple(region(px, (0, 0, 320, 120))[::37]))
+    assert len(seen) >= 3, f"only {len(seen)} distinct views across 5 tracks"
+
+
+@case
+def gameboy_mode_uses_only_dmg_shades(tmp):
+    """The point of the mode is the four-colour palette; a leak would show as
+    an off-palette pixel."""
+    px = run({"EMU_MODE": "2", "EMU_EXIT_MS": "2000"}, tmp("dmg"))
+    # Sample the artwork area only; text antialiasing is not in scope.
+    sampled = region(px, (100, 20, 120, 120))
+    def greenish(p):
+        r, g, b = p
+        return g >= r and g >= b
+    off = sum(1 for p in sampled if not greenish(p))
+    assert off == 0, f"{off} non-green pixels in Game Boy mode"
 
 
 @case

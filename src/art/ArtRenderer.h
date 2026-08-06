@@ -7,11 +7,17 @@
 // prove the scaling is correct; only real hardware can prove it is fast enough
 // and fits in heap.
 
+#include <M5Unified.h>
+
 #include <cstdint>
 
 // Returns false if the artwork could not be drawn, in which case the caller is
 // responsible for painting a flat fallback block.
 bool drawArt(const char *path, int x, int y, int size);
+
+// Decodes artwork into any target — the panel, or a sprite a mode owns — fitted
+// to `size`. Modes use this to build their own stylised renderings of the cover.
+bool drawArtInto(LovyanGFX *dst, const char *path, int x, int y, int size);
 
 // Samples the artwork and returns its most vivid colour, for tinting UI that
 // should feel like it belongs to the current album.
