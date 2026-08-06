@@ -15,6 +15,7 @@
 
 #include "core/AppState.h"
 #include "core/Clock.h"
+#include "art/ArtRenderer.h"
 #include "core/Diag.h"
 #include "core/CommandQueue.h"
 #include "input/Buttons.h"
@@ -222,6 +223,9 @@ void harnessSubmit(const Command &c) { submit(c); }
 void setup(void) {
   auto cfg = M5.config();
   M5.begin(cfg);
+
+  // Before WiFi and TLS get a chance to fragment the heap.
+  initArtBuffer();
 
   theme::applyBrightness(theme::BRIGHT_ACTIVE);
   M5.Display.fillScreen(theme::pal.bg);

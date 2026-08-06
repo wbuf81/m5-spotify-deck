@@ -13,6 +13,11 @@
 
 // Returns false if the artwork could not be drawn, in which case the caller is
 // responsible for painting a flat fallback block.
+// Reserves the shared artwork buffer. Call once at boot, before WiFi and TLS
+// fragment the heap — a late allocation of this size is exactly what failed on
+// hardware.
+void initArtBuffer();
+
 bool drawArt(const char *path, int x, int y, int size);
 
 // Decodes artwork into any target — the panel, or a sprite a mode owns — fitted

@@ -104,11 +104,16 @@ bool request(const char *method, const std::string &url,
   }
 
   // Responses here are small — /me/player measured 3.8KB — so buffering is
-  // safe. Anything large enough to matter is artwork, which streams to SD via
-  // downloadToFile instead.
-  const int len = http.getSize();
-  if (len > 0 && len < 64 * 1024) out->body.reserve(len);
-  out->body = std::string(http.getString().c_str());
+  // safe. Anything large enough to matter is artwork, which streams to SD.
+  //
+  // No reserve(): it was an optimisation that could throw bad_alloc under heap
+  // pressure, and an uncaught throw on the ESP32 is abort(). Assigned directly
+  // from the Arduino String rather than round-tripping through c_str(), which
+  // allocated the body twice.
+  {
+    String payload = http.getString();
+    out->body.assign(payload.c_str(), payload.length());
+  }
 
   http.end();
   return true;

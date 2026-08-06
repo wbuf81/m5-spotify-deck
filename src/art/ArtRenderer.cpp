@@ -1,60 +1,43 @@
 #include "ArtRenderer.h"
 
+#include "../net/NetLog.h"
 #include "../ui/Theme.h"
 
 #include <M5Unified.h>
 
 #include <cstdio>
-#include <vector>
+#include <memory>
+#include <new>
 
 namespace {
 
-// Buffered decode on both platforms.
+// Streams the JPEG off disk instead of buffering it.
 //
-// The spec originally required streaming from SD so a cover never sat in heap
-// whole. Two things changed that. This M5GFX version has no
-// DataWrapperT<fs::FS> specialisation, so drawJpgFile cannot be handed the SD
-// object at all; and the sizing that motivated streaming does not hold — we
-// select the smallest image at or above the 176px artwork region, which is
-// Spotify's 300px variant at roughly 25-40KB, against ~275KB of free heap.
+// Two earlier attempts failed on hardware and are worth recording:
 //
-// The download still streams straight to disk (see Esp32HttpClient), which was
-// always the larger win: the file never sits in RAM while it is being fetched.
-// Buffering only for the decode keeps one code path across both platforms, so
-// the emulator exercises exactly what the device runs.
+//   1. std::vector::resize per decode. Covers are ~46KB, we decode twice per
+//      album (tint, then draw), and once WiFi and TLS have fragmented the heap
+//      a 46KB contiguous request fails even with 135KB free. bad_alloc with no
+//      handler becomes abort(), so the board reboot-looped.
+//   2. One 72KB buffer reserved at boot. That removed the churn but took the
+//      memory permanently: free heap fell 256KB -> 182KB and mbedTLS could no
+//      longer complete a handshake. The crash simply moved to the net task.
 //
-// If heap ever gets tight, the fix is a custom DataWrapper over stdio rather
-// than a second code path.
-bool readFile(const char *path, std::vector<uint8_t> *out) {
-  FILE *f = std::fopen(path, "rb");
-  if (!f) return false;
-  std::fseek(f, 0, SEEK_END);
-  const long len = std::ftell(f);
-  std::fseek(f, 0, SEEK_SET);
-  if (len <= 0) {
-    std::fclose(f);
-    return false;
-  }
-  out->resize(static_cast<size_t>(len));
-  const size_t n = std::fread(out->data(), 1, out->size(), f);
-  std::fclose(f);
-  return n == out->size();
-}
-
-// Decodes a JPEG into any LovyanGFX target — the panel, or an off-screen
-// sprite — fitted to `size`.
-//
-// scale 0.0 asks LovyanGFX to fit maxWidth/maxHeight, which is what makes the
-// non-power-of-two 300 -> 176 reduction work without hardcoding the source
-// dimensions. On the device the path lives under /sd, which Arduino's SD
-// library exposes to stdio through the ESP-IDF VFS.
+// LovyanGFX's default data wrapper reads through stdio, and SD is mounted at
+// /sd via the ESP-IDF VFS, so drawJpgFile decodes straight from the card with
+// no large allocation anywhere. The same call works on the host.
 bool decodeInto(LovyanGFX *dst, const char *path, int x, int y, int size) {
-  std::vector<uint8_t> jpg;
-  if (!readFile(path, &jpg)) return false;
-  return dst->drawJpg(jpg.data(), jpg.size(), x, y, size, size, 0, 0, 0.0f, 0.0f);
+  // scale 0.0 asks LovyanGFX to fit maxWidth/maxHeight, which is what makes the
+  // non-power-of-two 300 -> 176 reduction work without hardcoding the source
+  // dimensions.
+  return dst->drawJpgFile(path, x, y, size, size, 0, 0, 0.0f, 0.0f);
 }
 
 }  // namespace
+
+// Kept as a no-op: nothing is reserved any more, and the call site documents
+// that the decision was deliberate rather than forgotten.
+void initArtBuffer() {}
 
 bool drawArtInto(LovyanGFX *dst, const char *path, int x, int y, int size) {
   if (!dst || !path || path[0] == '\0') return false;
