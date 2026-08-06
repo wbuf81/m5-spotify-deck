@@ -26,15 +26,28 @@ extern const uint8_t rootca_crt_bundle_start[] asm("_binary_x509_crt_bundle_star
 
 namespace {
 
-WiFiClientSecure &tlsClient() {
-  static WiFiClientSecure *c = nullptr;
-  if (!c) {
-    c = new WiFiClientSecure();
-    c->setCACertBundle(rootca_crt_bundle_start);
-    // Spotify answers well inside this; the ceiling exists so a black-holed
-    // connection cannot wedge the net task indefinitely.
-    c->setTimeout(15);
-  }
+WiFiClientSecure *makeClient() {
+  auto *c = new WiFiClientSecure();
+  c->setCACertBundle(rootca_crt_bundle_start);
+  // Spotify answers well inside this; the ceiling exists so a black-holed
+  // connection cannot wedge the net task indefinitely.
+  c->setTimeout(15);
+  return c;
+}
+
+// One session per host, deliberately.
+//
+// Sharing a single client between api.spotify.com and i.scdn.co meant every
+// artwork download tore down the API connection, so the next poll paid a full
+// TLS handshake. Measured on hardware: /me/player was costing ~900ms where
+// session reuse should make it a quarter of that.
+WiFiClientSecure &apiClient() {
+  static WiFiClientSecure *c = makeClient();
+  return *c;
+}
+
+WiFiClientSecure &cdnClient() {
+  static WiFiClientSecure *c = makeClient();
   return *c;
 }
 
@@ -49,11 +62,17 @@ bool request(const char *method, const std::string &url,
   out->status = 0;
   out->retry_after_s = 0;
 
-  HTTPClient http;
+  // One persistent HTTPClient, not a fresh one per request.
+  //
+  // Keep-alive state lives on HTTPClient, not on the WiFiClientSecure it wraps,
+  // so constructing one per call threw the connection away every time and paid
+  // a full TLS handshake. Measured: /me/player cost ~930ms on every poll, two
+  // seconds apart, which is a handshake rather than a request.
+  static HTTPClient http;
   http.setReuse(true);
   http.setConnectTimeout(10000);
   http.setTimeout(15000);
-  if (!http.begin(tlsClient(), url.c_str())) {
+  if (!http.begin(apiClient(), url.c_str())) {
     NETLOG("http.begin failed for %s", url.c_str());
     return false;
   }
@@ -82,6 +101,7 @@ bool request(const char *method, const std::string &url,
   const char *collect[] = {"Retry-After"};
   http.collectHeaders(collect, 1);
 
+  const uint32_t t_send = millis();
   int code;
   if (body.empty()) {
     code = http.sendRequest(method);
@@ -97,6 +117,12 @@ bool request(const char *method, const std::string &url,
     http.end();
     return false;
   }
+
+#if defined(TRACE_RENDER)
+  NETLOG("  %s took %ums", method, (unsigned)(millis() - t_send));
+#else
+  (void)t_send;
+#endif
 
   out->status = code;
   if (http.hasHeader("Retry-After")) {
@@ -120,6 +146,8 @@ bool request(const char *method, const std::string &url,
 }
 
 bool downloadToFile(const std::string &url, const std::string &path) {
+  // Separate instance: mixing the CDN into the API's client would evict its
+  // keep-alive on every album change.
   // Open the destination BEFORE fetching. The first version did the GET first,
   // so with unusable storage it downloaded ~30KB over TLS every poll and threw
   // it away — a permanent request storm against Spotify's CDN.
@@ -130,11 +158,11 @@ bool downloadToFile(const std::string &url, const std::string &path) {
     return false;
   }
 
-  HTTPClient http;
-  http.setReuse(false);  // the CDN is a different host to the API
+  static HTTPClient http;
+  http.setReuse(true);  // its own session, so keeping it alive is free
   http.setConnectTimeout(10000);
   http.setTimeout(20000);
-  if (!http.begin(tlsClient(), url.c_str())) {
+  if (!http.begin(cdnClient(), url.c_str())) {
     std::fclose(f);
     std::remove(tmp.c_str());
     return false;

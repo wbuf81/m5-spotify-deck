@@ -60,6 +60,15 @@ class SpotifySource {
   uint32_t confirm_started_ms_ = 0;
   unsigned confirm_polls_ = 0;
 
+  // The saved-state check is a whole extra round trip. Running it in the same
+  // step as the poll kept the new track off screen until it finished.
+  bool liked_pending_ = false;
+
+  // Artwork is fetched after the track is already on screen. Downloading it
+  // inside the poll kept metadata we already had waiting on a 46KB transfer.
+  std::string pending_art_album_;
+  std::string pending_art_url_;
+
   // Cleared permanently once /me/tracks/contains answers 403: the restriction
   // is per-app, so retrying every poll would just burn rate limit forever.
   bool liked_supported_ = true;

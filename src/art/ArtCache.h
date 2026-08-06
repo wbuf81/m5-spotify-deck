@@ -18,6 +18,10 @@ class ArtCache {
   // than failing.
   std::string ensure(const std::string &album_id, const std::string &url);
 
+  // Path if already cached, empty otherwise. Never touches the network, so the
+  // poll path can use it without paying for a download.
+  std::string cachedPath(const std::string &album_id) const;
+
  private:
   std::string dir_;
 

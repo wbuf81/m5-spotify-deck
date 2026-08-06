@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "../net/HttpClient.h"
+#include "../core/Clock.h"
 #include "../net/NetLog.h"
 #include "../ui/Theme.h"
 
@@ -196,7 +197,7 @@ void SpotifySource::runCommand(const Command &c, AppState *out,
       // on another device, so allow longer than feels reasonable before giving
       // up and falling back to the normal cadence.
       confirm_until_ms_ = now_ms + 8000;
-      next_poll_ms_ = now_ms + 200;
+      next_poll_ms_ = now_ms + 120;
     } else {
       next_poll_ms_ = now_ms + 250;
     }
@@ -210,6 +211,11 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
   }
 
   if (resp.status == 204 || resp.body.empty()) {
+    // 204 means Spotify has no active playback session at all — not merely
+    // paused. It happens when the app that was playing has gone idle or been
+    // closed, and it is the difference between "nothing playing" and "we lost
+    // the connection", which look identical on screen if not reported.
+    NETLOG("state: /me/player 204 — no active session");
     out->pb.has_track = false;
     out->pb.is_playing = false;
     polled_ = true;
@@ -263,10 +269,19 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
 
   // Artwork only touches the network on an album change, and only on a cache
   // miss after that.
+  // Artwork: use the cache if it is already there, otherwise queue the
+  // download and let this poll finish. Fetching inline meant the new title sat
+  // in a buffer for the length of a 46KB transfer before reaching the screen.
   const char *img = pickImage(album["images"], theme::ART_SIZE);
   if (img && out->pb.album_id[0]) {
-    const std::string path = art_.ensure(out->pb.album_id, img);
-    setStr(out->pb.art_path, PATH_LEN, path.c_str());
+    const std::string cached = art_.cachedPath(out->pb.album_id);
+    if (!cached.empty()) {
+      setStr(out->pb.art_path, PATH_LEN, cached.c_str());
+    } else {
+      out->pb.art_path[0] = '\0';
+      pending_art_album_ = out->pb.album_id;
+      pending_art_url_ = img;
+    }
   } else {
     out->pb.art_path[0] = '\0';
   }
@@ -285,8 +300,17 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
       confirm_polls_ = 0;
       confirm_track_.clear();
     } else {
-      next_poll_ms_ = now_ms + 200;
+      next_poll_ms_ = now_ms + 120;
       return;
+    }
+  }
+
+  {
+    static uint32_t last_state_log = 0;
+    if (now_ms - last_state_log > 10000) {
+      last_state_log = now_ms;
+      NETLOG("state: playing=%d device=%d '%s' vol=%d", (int)out->pb.is_playing,
+             (int)out->pb.has_device, out->pb.title, out->pb.volume_pct);
     }
   }
 
@@ -425,9 +449,45 @@ void SpotifySource::step(AppState *out, CommandQueue<> *cmds, uint32_t now_ms) {
     runCommand(c, out, now_ms);
   }
 
-  if (now_ms < next_poll_ms_) return;
+  if (now_ms < next_poll_ms_) {
+    // Between polls is exactly when there is time for the saved-state check.
+    // Doing it immediately after the poll delayed the new track reaching the
+    // screen by a whole extra round trip, because the caller only merges once
+    // step() returns.
+    // Artwork first: a missing cover is more visible than a missing heart.
+    if (!pending_art_album_.empty()) {
+      const std::string album = pending_art_album_;
+      const std::string url = pending_art_url_;
+      pending_art_album_.clear();
+      pending_art_url_.clear();
+      const uint32_t t0 = now_ms;
+      const std::string path = art_.ensure(album, url);
+      NETLOG("artwork fetch %ums%s", (unsigned)(nowMs() - t0),
+             path.empty() ? " (failed)" : "");
+      if (!path.empty() && album == out->pb.album_id) {
+        setStr(out->pb.art_path, PATH_LEN, path.c_str());
+        // Publish it: the merge only copies when a poll happened.
+        polled_ = true;
+      }
+      return;
+    }
+    if (liked_pending_) {
+      liked_pending_ = false;
+      refreshLiked(out, now_ms);
+    }
+    return;
+  }
+
+  const uint32_t t0 = now_ms;
   pollPlayer(out, now_ms);
-  refreshLiked(out, now_ms);
+  if (polled_) {
+    liked_pending_ = true;
+#if defined(TRACE_RENDER)
+    NETLOG("poll round trip %ums", (unsigned)(nowMs() - t0));
+#else
+    (void)t0;
+#endif
+  }
 
   if (std::getenv("SPOTIFY_DIAG_WRITE")) {
     static bool done = false;

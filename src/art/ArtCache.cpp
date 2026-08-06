@@ -44,6 +44,12 @@ void ArtCache::begin(const std::string &dir) {
   }
 }
 
+std::string ArtCache::cachedPath(const std::string &album_id) const {
+  if (!safeId(album_id) || dir_.empty()) return "";
+  const std::string path = dir_ + "/" + album_id + ".jpg";
+  return fileExists(path) ? path : "";
+}
+
 std::string ArtCache::ensure(const std::string &album_id,
                              const std::string &url) {
   if (!safeId(album_id) || url.empty()) return "";
