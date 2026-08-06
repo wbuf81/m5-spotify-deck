@@ -52,6 +52,14 @@ class SpotifySource {
   uint32_t rate_limited_until_ms_ = 0;
   bool polled_ = false;
 
+  // After a skip, poll rapidly until the track actually changes rather than
+  // waiting a fixed delay and hoping. Spotify needs a moment to settle, and
+  // that moment varies.
+  std::string confirm_track_;
+  uint32_t confirm_until_ms_ = 0;
+  uint32_t confirm_started_ms_ = 0;
+  unsigned confirm_polls_ = 0;
+
   // Cleared permanently once /me/tracks/contains answers 403: the restriction
   // is per-app, so retrying every poll would just burn rate limit forever.
   bool liked_supported_ = true;

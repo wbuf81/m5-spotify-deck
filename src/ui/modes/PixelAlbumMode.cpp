@@ -9,26 +9,34 @@
 #include "../TimeFormat.h"
 
 namespace {
-// 40x30 cells of 8px fills 320x240 exactly.
-constexpr int COLS = 40, ROWS = 30, CELL = 8;
+// 80x60 cells of 4px fills 320x240 exactly.
+//
+// The first pass used 8px cells and an RGB332 palette, which is NES territory:
+// 40 visible columns and 256 colours. The SNES ran 256x224 with 15-bit colour,
+// so the look wants the opposite of what that did — finer cells AND a richer
+// palette. 4px lands between "obviously pixel art" and "just a small photo".
+constexpr int COLS = 80, ROWS = 60, CELL = 4;
 constexpr int PANEL_Y = 176;
 
-// 4x4 Bayer, so quantisation breaks into a pattern instead of banding.
+// 4x4 Bayer, only lightly applied now.
 constexpr int BAYER[4][4] = {
     {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
 
 int clamp8(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
 
-// RGB332: 3 bits red, 3 green, 2 blue — the authentic 8-bit palette. Straight
-// quantisation of a gradient sky produced hard horizontal stripes that read as
-// a glitch rather than as pixel art, so each cell is nudged by its dither
-// threshold first. Blue gets the largest nudge because it has the fewest bits.
+// 4 bits per channel, roughly the SNES's 15-bit colour space rather than the
+// 8-bit RGB332 this used before. Banding is mild at this depth, so the dither
+// is a gentle nudge to break gradients rather than the heavy checkerboard that
+// RGB332 needed — that texture was most of what read as "too pixelly".
 uint16_t posterize(uint16_t c, int cx, int cy) {
-  const int t = BAYER[cy & 3][cx & 3] - 8;
-  const int r = clamp8((((c >> 11) & 0x1F) << 3) + t * 3) & 0xE0;
-  const int g = clamp8((((c >> 5) & 0x3F) << 2) + t * 3) & 0xE0;
-  const int b = clamp8(((c & 0x1F) << 3) + t * 7) & 0xC0;
-  return M5.Display.color565(r | (r >> 3), g | (g >> 3), b | (b >> 2));
+  // Quarter-step, not half. A full half-step is textbook ordered dithering and
+  // it is correct for banding, but on a flat bright area — a moon, a sky — it
+  // shows as a checkerboard that reads as an artefact rather than as art.
+  const int t = (BAYER[cy & 3][cx & 3] - 8) / 2;
+  const int r = clamp8((((c >> 11) & 0x1F) << 3) + t) & 0xF0;
+  const int g = clamp8((((c >> 5) & 0x3F) << 2) + t) & 0xF0;
+  const int b = clamp8(((c & 0x1F) << 3) + t) & 0xF0;
+  return M5.Display.color565(r | (r >> 4), g | (g >> 4), b | (b >> 4));
 }
 }  // namespace
 
@@ -38,7 +46,7 @@ void PixelAlbumMode::enter(const AppState &st, const ViewCtx &ctx) {
   // Decode once at cell resolution; the panel gets blocks, not a scaled image.
   M5Canvas src(&M5.Display);
   src.setColorDepth(16);
-  const bool ok = src.createSprite(COLS, COLS);
+  const bool ok = src.createSprite(COLS, COLS);  // square source, cropped below
   if (ok) {
     src.fillSprite(theme::pal.bg);
     drawArtInto(&src, ctx.art_path, 0, 0, COLS);
@@ -83,7 +91,7 @@ void PixelAlbumMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t) {
   last_sec_ = sec;
 
   // Blocky progress, in the same cell grid as the artwork.
-  constexpr int CELLS = 40, CW = 8, BY = 230;
+  constexpr int CELLS = 80, CW = 4, BY = 230;
   int filled = 0;
   if (st.pb.duration_ms > 0) {
     filled = static_cast<int>((static_cast<uint64_t>(CELLS) * st.pb.progress_ms) /

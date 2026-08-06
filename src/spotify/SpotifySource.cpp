@@ -184,8 +184,22 @@ void SpotifySource::runCommand(const Command &c, AppState *out,
     out->showToast("Command failed", now_ms);
   } else {
     out->pb.has_device = true;
-    // Poll promptly so the confirmed state lands soon after the settle window.
-    next_poll_ms_ = now_ms + 700;
+
+    if (c.type == CommandType::Next || c.type == CommandType::Previous) {
+      // Remember what was playing and chase the change. A flat delay was the
+      // largest single contributor to skip latency: too short and the poll
+      // returns the old track, too long and the screen just sits there.
+      confirm_track_ = out->pb.track_id;
+      confirm_started_ms_ = now_ms;
+      confirm_polls_ = 0;
+      // Spotify Connect can take a while to reflect a skip when playback lives
+      // on another device, so allow longer than feels reasonable before giving
+      // up and falling back to the normal cadence.
+      confirm_until_ms_ = now_ms + 8000;
+      next_poll_ms_ = now_ms + 200;
+    } else {
+      next_poll_ms_ = now_ms + 250;
+    }
   }
 }
 
@@ -258,6 +272,24 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
   }
 
   polled_ = true;
+
+  // Still chasing a skip: keep polling fast until the track really changes.
+  if (confirm_until_ms_ != 0) {
+    const bool changed = confirm_track_ != out->pb.track_id;
+    ++confirm_polls_;
+    if (changed || now_ms >= confirm_until_ms_) {
+      NETLOG("skip confirmed after %u polls, %ums%s", confirm_polls_,
+             (unsigned)(now_ms - confirm_started_ms_),
+             changed ? "" : " (GAVE UP)");
+      confirm_until_ms_ = 0;
+      confirm_polls_ = 0;
+      confirm_track_.clear();
+    } else {
+      next_poll_ms_ = now_ms + 200;
+      return;
+    }
+  }
+
   next_poll_ms_ =
       now_ms + (out->pb.is_playing ? POLL_PLAYING_MS : POLL_PAUSED_MS);
 }

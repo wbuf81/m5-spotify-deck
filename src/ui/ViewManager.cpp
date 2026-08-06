@@ -76,6 +76,23 @@ void ViewManager::selectFor(const char *track_id) {
   NETLOG("view: %s", currentName());
 }
 
+const char *ViewManager::cycleMode() {
+  // -2 rotate -> -1 classic -> 0..5 -> back to -2.
+  if (pinned_ == -2) {
+    pinned_ = -1;
+  } else if (pinned_ >= MODE_COUNT - 2) {
+    pinned_ = -2;
+  } else {
+    pinned_ += 1;
+  }
+
+  if (pinned_ != -2) current_ = pinned_;
+  force_ = true;
+  entered_ = false;
+  classic_.invalidate();
+  return pinned_ == -2 ? "auto" : currentName();
+}
+
 void ViewManager::render(const AppState &st, uint32_t now_ms) {
   const bool track_changed = std::strcmp(last_track_, st.pb.track_id) != 0;
 

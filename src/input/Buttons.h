@@ -26,6 +26,7 @@ class Buttons {
   }
 
   BtnEvent event(Btn b) const { return ev_[static_cast<int>(b)]; }
+  bool isDown(Btn b) const { return logic_[static_cast<int>(b)].isDown(); }
 
   bool anyActivity() const {
     for (int i = 0; i < 3; ++i) {

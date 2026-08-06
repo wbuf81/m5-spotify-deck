@@ -151,7 +151,33 @@ void handleButtons(uint32_t now_ms) {
   const BtnEvent b = g_buttons.event(Btn::B);
   const BtnEvent c = g_buttons.event(Btn::C);
 
+  // A+C together cycles the theme. All six single-button actions are already
+  // assigned, so a two-button hold is the only gesture left.
+  //
+  // While the combo is held every other action is suppressed, including the
+  // taps that would fire on release. Without that, reaching for both buttons
+  // would skip a track on the way.
+  static bool combo = false;
+  const bool both_down = g_buttons.isDown(Btn::A) && g_buttons.isDown(Btn::C);
+  if (both_down && !combo) {
+    combo = true;
+    char msg[48];
+    std::snprintf(msg, sizeof(msg), "theme: %s", g_screen.cycleMode());
+    mutateState([&](AppState &st) { st.showToast(msg, now_ms, 1600); });
+    return;
+  }
+  if (combo) {
+    if (!g_buttons.isDown(Btn::A) && !g_buttons.isDown(Btn::C)) combo = false;
+    return;
+  }
+
   if (a == BtnEvent::Tap) {
+    // Reset the clock immediately. Unlike play/pause there is nothing truthful
+    // to show optimistically — the next track's title is unknown — but the
+    // position is about to be zero either way, so the bar can acknowledge the
+    // press at once instead of sitting still for a second.
+    g_clock.reset(0);
+    mutateState([&](AppState &st) { st.pb.progress_ms = 0; });
     submit({CommandType::Previous, 0});
   } else if (a == BtnEvent::LongStart || a == BtnEvent::LongRepeat) {
     nudgeVolume(-VOLUME_STEP, now_ms);
@@ -178,6 +204,8 @@ void handleButtons(uint32_t now_ms) {
   }
 
   if (c == BtnEvent::Tap) {
+    g_clock.reset(0);
+    mutateState([&](AppState &st) { st.pb.progress_ms = 0; });
     submit({CommandType::Next, 0});
   } else if (c == BtnEvent::LongStart || c == BtnEvent::LongRepeat) {
     nudgeVolume(VOLUME_STEP, now_ms);

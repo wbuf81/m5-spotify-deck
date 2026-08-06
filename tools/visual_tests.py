@@ -350,17 +350,30 @@ def view_mode_rotates_between_tracks(tmp):
 
 
 @case
-def gameboy_mode_uses_only_dmg_shades(tmp):
-    """The point of the mode is the four-colour palette; a leak would show as
-    an off-palette pixel."""
-    px = run({"EMU_MODE": "2", "EMU_EXIT_MS": "2000"}, tmp("dmg"))
-    # Sample the artwork area only; text antialiasing is not in scope.
-    sampled = region(px, (100, 20, 120, 120))
-    def greenish(p):
-        r, g, b = p
-        return g >= r and g >= b
-    off = sum(1 for p in sampled if not greenish(p))
-    assert off == 0, f"{off} non-green pixels in Game Boy mode"
+def gameboy_mode_draws_the_handheld_in_colour(tmp):
+    """The mode is now the device itself with a colourised cover in its LCD.
+
+    It used to be four DMG greens over the whole screen, and this test asserted
+    exactly that — so it correctly failed when the design changed. Rewritten
+    against what the mode is for: a recognisable body, and album colour inside
+    the screen rather than a green wash.
+    """
+    px = run({"EMU_MODE": "2", "EMU_EXIT_MS": "2000"}, tmp("gb"))
+
+    # The plastic body: a large flat region of one light, desaturated colour.
+    body = region(px, (20, 150, 100, 40))
+    from collections import Counter
+    dominant, count = Counter(body).most_common(1)[0]
+    r, g, b = dominant
+    assert count > len(body) * 0.5, "no solid body colour where the shell should be"
+    assert min(r, g, b) > 100, f"body is too dark to read as plastic: {dominant}"
+    assert max(r, g, b) - min(r, g, b) < 60, f"body is too saturated: {dominant}"
+
+    # The LCD must carry the album's colour, not a monochrome wash.
+    lcd = region(px, (30, 30, 100, 84))
+    assert len(set(lcd)) > 20, "LCD looks flat; artwork did not render"
+    coloured = sum(1 for (r, g, b) in lcd if max(r, g, b) - min(r, g, b) > 40)
+    assert coloured > 200, f"LCD is monochrome ({coloured} saturated pixels)"
 
 
 @case

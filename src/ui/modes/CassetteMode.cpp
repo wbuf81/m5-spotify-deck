@@ -5,7 +5,6 @@
 
 #include "../../art/ArtRenderer.h"
 #include "../Anim.h"
-#include "../Crt.h"
 #include "../TextWrap.h"
 #include "../Theme.h"
 #include "../TimeFormat.h"
@@ -56,7 +55,8 @@ void CassetteMode::enter(const AppState &st, const ViewCtx &ctx) {
   M5.Display.fillRoundRect(WIN_X, WIN_Y, WIN_W, WIN_H, 4, theme::pal.bg);
   M5.Display.drawRoundRect(WIN_X, WIN_Y, WIN_W, WIN_H, 4, edge);
 
-  crt::apply(0, 0, 320, 240);
+  // No scanlines here. A cassette is an object, not a display — and over the
+  // label they made the title genuinely hard to read for no benefit.
   last_sec_ = -1;
   last_ms_ = 0;
 }
@@ -74,28 +74,57 @@ void CassetteMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms)
   // Tape leaves the left reel and gathers on the right. Radii are the progress.
   const float rl = TAPE_MAX - (TAPE_MAX - TAPE_MIN) * p;
   const float rr = TAPE_MIN + (TAPE_MAX - TAPE_MIN) * p;
-  const uint16_t tape = anim::lerp565(theme::pal.bg, theme::pal.text, 0.28f);
+  // Tape is dark and matte, not the flat grey disc this used to draw. The
+  // winding grooves are what actually sell it — a plain filled circle reads as
+  // a washer, and no amount of spoke animation fixes that.
+  const uint16_t tape_dark = M5.Display.color565(38, 28, 22);
+  const uint16_t tape_ring = M5.Display.color565(64, 48, 38);
+  const uint16_t hub_face = anim::lerp565(theme::pal.bg, theme::pal.text, 0.72f);
+  const uint16_t hub_notch = M5.Display.color565(26, 22, 20);
 
   struct Reel { int x; float r; float dir; };
   const Reel reels[2] = {{HUB_L_X, rl, 1.0f}, {HUB_R_X, rr, -1.0f}};
 
   for (const auto &reel : reels) {
-    // Clear only the reel's own footprint at maximum radius.
+    const int ir = static_cast<int>(reel.r);
+    // Clear only this reel's own footprint at maximum radius.
     M5.Display.fillCircle(reel.x, HUB_Y, TAPE_MAX + 1, theme::pal.bg);
-    M5.Display.fillCircle(reel.x, HUB_Y, static_cast<int>(reel.r), tape);
-    M5.Display.drawCircle(reel.x, HUB_Y, static_cast<int>(reel.r), ctx.tint);
-    M5.Display.fillCircle(reel.x, HUB_Y, HUB_R, theme::pal.bg);
-    M5.Display.drawCircle(reel.x, HUB_Y, HUB_R, ctx.tint);
 
-    // Three spokes make the rotation visible; a plain disc would look static.
-    for (int s = 0; s < 3; ++s) {
-      const float a = spin_ * reel.dir + s * 2.0944f;
-      M5.Display.drawLine(reel.x, HUB_Y,
-                          reel.x + static_cast<int>(std::cos(a) * (HUB_R - 2)),
-                          HUB_Y + static_cast<int>(std::sin(a) * (HUB_R - 2)),
-                          ctx.tint);
+    // Wound tape, with concentric grooves for depth.
+    M5.Display.fillCircle(reel.x, HUB_Y, ir, tape_dark);
+    for (int rr2 = HUB_R + 3; rr2 < ir - 1; rr2 += 3) {
+      M5.Display.drawCircle(reel.x, HUB_Y, rr2, tape_ring);
     }
+    M5.Display.drawCircle(reel.x, HUB_Y, ir, ctx.tint);
+
+    // Hub, with the six notches a real cassette spindle has. These are what
+    // make the rotation legible; three plain spokes read as a fan.
+    M5.Display.fillCircle(reel.x, HUB_Y, HUB_R, hub_face);
+    for (int t = 0; t < 6; ++t) {
+      const float a = spin_ * reel.dir + t * 1.0472f;  // 60 degrees apart
+      const float ca = std::cos(a), sa = std::sin(a);
+      const float pa = -sa, pb = ca;  // perpendicular, for tooth width
+      const int x0 = static_cast<int>(reel.x + ca * 4.0f + pa * 2.4f);
+      const int y0 = static_cast<int>(HUB_Y + sa * 4.0f + pb * 2.4f);
+      const int x1 = static_cast<int>(reel.x + ca * 4.0f - pa * 2.4f);
+      const int y1 = static_cast<int>(HUB_Y + sa * 4.0f - pb * 2.4f);
+      const int x2 = static_cast<int>(reel.x + ca * (HUB_R - 1));
+      const int y2 = static_cast<int>(HUB_Y + sa * (HUB_R - 1));
+      M5.Display.fillTriangle(x0, y0, x1, y1, x2, y2, hub_notch);
+    }
+    M5.Display.fillCircle(reel.x, HUB_Y, 3, hub_notch);
+    M5.Display.drawCircle(reel.x, HUB_Y, HUB_R, ctx.tint);
   }
+
+  // Exposed tape spanning the head path, drawn last so the reels do not bury
+  // it. It leaves each pack at that pack's current radius, so the span shifts
+  // as the tape transfers.
+  const int ty = HUB_Y + TAPE_MAX - 2;
+  M5.Display.fillRect(HUB_L_X, ty, HUB_R_X - HUB_L_X, 2, tape_dark);
+  M5.Display.drawLine(HUB_L_X, ty, HUB_L_X - static_cast<int>(rl * 0.7f),
+                      HUB_Y + static_cast<int>(rl * 0.7f), tape_dark);
+  M5.Display.drawLine(HUB_R_X, ty, HUB_R_X + static_cast<int>(rr * 0.7f),
+                      HUB_Y + static_cast<int>(rr * 0.7f), tape_dark);
 
   const int sec = static_cast<int>(st.pb.progress_ms / 1000);
   if (sec != last_sec_) {

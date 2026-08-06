@@ -11,9 +11,11 @@
 namespace {
 
 // How often the task wakes. The source decides when it actually polls; this is
-// only the granularity at which queued commands get picked up, so it wants to
-// be well under the settle window to keep presses feeling immediate.
-constexpr uint32_t TICK_MS = 100;
+// only the granularity at which a queued command gets picked up, so it is pure
+// added latency on every button press. At 100ms it was a visible part of the
+// ~1.2s lag on next/previous. The loop is cheap — a mutex, a struct copy, and
+// a time comparison — so a faster tick costs almost nothing.
+constexpr uint32_t TICK_MS = 25;
 
 #if !defined(EMULATOR)
 // mbedTLS handshakes are stack-hungry. The pthread default is nowhere near

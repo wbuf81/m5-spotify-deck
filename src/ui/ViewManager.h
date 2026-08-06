@@ -29,6 +29,10 @@ class ViewManager {
     force_ = true;
     entered_ = false;
   }
+  // Advances the manual selection: classic, then each full-screen mode, then
+  // back to rotating. Returns the new name for the on-screen confirmation.
+  const char *cycleMode();
+
   int pinned() const { return pinned_; }
   int current() const { return current_; }
   void render(const AppState &st, uint32_t now_ms);
