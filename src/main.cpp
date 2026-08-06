@@ -23,6 +23,10 @@
 #include "core/ProgressClock.h"
 #include "ui/StatusScreen.h"
 #include "ui/ViewManager.h"
+
+#if defined(EMULATOR)
+#include "platform/native/Harness.h"
+#endif
 #include "ui/Theme.h"
 
 #if defined(EMULATOR)
@@ -67,10 +71,16 @@ uint32_t dimAfterMs() {
 }
 constexpr uint32_t SLEEP_AFTER_IDLE_MS = 180000;
 
+}  // namespace
+
 AppState g_state;
 CommandQueue<> g_cmds;
-FakeSource g_fake;
 ViewManager g_screen;
+ProgressClock g_clock;
+
+namespace {
+
+FakeSource g_fake;
 StatusScreen g_status;
 bool g_showing_status = false;
 Buttons g_buttons;
@@ -84,8 +94,6 @@ uint32_t g_last_interaction_ms = 0;
 uint32_t g_last_frame_ms = 0;
 uint32_t g_not_playing_since_ms = 0;
 uint8_t g_brightness = theme::BRIGHT_ACTIVE;
-
-ProgressClock g_clock;
 
 bool g_volume_dirty = false;
 uint32_t g_volume_changed_at_ms = 0;
@@ -206,6 +214,11 @@ void updateBrightness(uint32_t now_ms) {
 
 }  // namespace
 
+#if defined(EMULATOR)
+// Lets the harness drive the same command path a real button press uses.
+void harnessSubmit(const Command &c) { submit(c); }
+#endif
+
 void setup(void) {
   auto cfg = M5.config();
   M5.begin(cfg);
@@ -252,6 +265,10 @@ void setup(void) {
   if (const char *t = std::getenv("EMU_TOAST")) {
     mutateState([&](AppState &st) { st.showToast(t, now); });
   }
+#endif
+
+#if defined(EMULATOR)
+  if (harness::active()) harness::printKeymap();
 #endif
 
   g_screen.invalidate();
@@ -317,7 +334,28 @@ void loop(void) {
     g_not_playing_since_ms = now;
   }
 
+#if defined(EMULATOR)
+  // Once per frame only: update() consumes key edges, so polling it twice
+  // would swallow every other keypress.
+  bool brightness_forced = false;
+  if (harness::active()) {
+    const harness::Overrides &ov = harness::update(&g_state, now);
+    if (ov.link >= 0) g_state.link = static_cast<LinkStatus>(ov.link);
+    if (ov.force_notrack) g_state.pb.has_track = false;
+    if (ov.brightness >= 0) {
+      brightness_forced = true;
+      if (ov.brightness != g_brightness) {
+        g_brightness = static_cast<uint8_t>(ov.brightness);
+        theme::applyBrightness(g_brightness);
+        g_screen.invalidate();
+        g_status.invalidate();
+      }
+    }
+  }
+  if (!brightness_forced) updateBrightness(now);
+#else
   updateBrightness(now);
+#endif
   heapTick(now);
 
   if (g_brightness != theme::BRIGHT_OFF) {
@@ -340,6 +378,9 @@ void loop(void) {
     } else {
       g_screen.render(g_state, now);
     }
+#if defined(EMULATOR)
+    if (harness::active()) harness::drawOverlay();
+#endif
   } else if (!was_asleep) {
     M5.Display.fillScreen(TFT_BLACK);
     g_screen.invalidate();

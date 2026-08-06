@@ -22,6 +22,47 @@ export HOMEBREW_PREFIX=/opt/homebrew        # Apple Silicon
 pio run -e native && ./.pio/build/native/program
 ```
 
+### Review harness
+
+```sh
+./tools/harness.sh          # fixture tracks, offline, deterministic
+./tools/harness.sh --live   # your real Spotify
+```
+
+Every state and animation on demand, rather than waiting for a track to end or
+for the network to fail on its own. Click the window first or the keys go to
+your terminal.
+
+| Key | |
+|---|---|
+| `1`..`7` | Pin a view: classic, pixel, gameboy, cassette, scoreboard, cyberdeck, synthwave |
+| `0` | Unpin — rotate per track again |
+| `[` `]` | Previous / next fixture track |
+| `,` `.` | Scrub ±10s | 
+| `m` | Jump to near the end |
+| `p` | Play / pause (fires the glyph morph) |
+| `f` | Toggle like (fires the heart animation) |
+| `v` `b` | Volume ∓5 |
+| `t` | Fire a toast |
+| `n` | Cycle link state: auto → connecting → offline → auth error → re-auth |
+| `k` | Toggle "nothing playing" |
+| `d` | Cycle brightness: auto → active → idle → off |
+| `c` | Toggle CRT scanlines |
+| `h` | Hide the status bar |
+| `q` | Quit |
+
+A bar across the top shows the active mode and last action — `~` means
+rotating, `*` means pinned. It deliberately covers the top ten rows of whatever
+is showing; knowing what is pinned matters more than those pixels.
+
+Scrubbing is the useful part for anything progress-driven: the cassette reels,
+the sinking synthwave sun, the scoreboard clock. Fixtures are the default
+because reviewing states should not depend on what happens to be playing, and
+scrubbing against a live player fights the next poll.
+
+The harness is `EMU_HARNESS`-gated and entirely inside `#if defined(EMULATOR)`;
+the device build is byte-identical without it.
+
 ### Controls
 
 | Key | Button | Tap | Hold |

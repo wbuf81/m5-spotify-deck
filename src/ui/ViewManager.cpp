@@ -42,6 +42,12 @@ void ViewManager::selectFor(const char *track_id) {
   }
 
   const uint32_t h = fnv1a(track_id);
+  scoreboard_.setTeam(static_cast<int>((h >> 8) % 2));
+
+  if (pinned_ != -2) {
+    current_ = pinned_;
+    return;
+  }
 
 #if defined(EMULATOR)
   // EMU_MODE pins one view, for inspection and for the visual tests.
@@ -57,17 +63,13 @@ void ViewManager::selectFor(const char *track_id) {
   int pick = static_cast<int>(h % MODE_COUNT) - 1;
   if (pick == current_) pick = (pick + 2 > MODE_COUNT - 2) ? -1 : pick + 1;
   current_ = pick;
-
-  // Alternate teams so both get a turn rather than one being effectively
-  // pinned by whichever tracks happen to hash to this mode.
-  scoreboard_.setTeam(static_cast<int>((h >> 8) % 2));
 }
 
 void ViewManager::render(const AppState &st, uint32_t now_ms) {
   const bool track_changed = std::strcmp(last_track_, st.pb.track_id) != 0;
 
   if (track_changed || force_) {
-    if (track_changed) {
+    if (track_changed || pinned_ != -2) {
       // Leaving a mode: hand back its buffers before the next one allocates,
       // so the two are never resident at once.
       if (current_ >= 0 && modes_[current_]) modes_[current_]->release();

@@ -21,6 +21,16 @@
 class ViewManager {
  public:
   void invalidate() { force_ = true; }
+
+  // Runtime pinning, for the interactive harness. -2 means "rotate per track",
+  // -1 is classic, 0..5 the full-screen modes.
+  void pin(int mode) {
+    pinned_ = mode;
+    force_ = true;
+    entered_ = false;
+  }
+  int pinned() const { return pinned_; }
+  int current() const { return current_; }
   void render(const AppState &st, uint32_t now_ms);
   void release();
   const char *currentName() const;
@@ -41,6 +51,7 @@ class ViewManager {
 
   ViewMode *modes_[MODE_COUNT - 1] = {};
   int current_ = -1;  // -1 == classic
+  int pinned_ = -2;   // -2 == rotate
   bool force_ = true;
   bool entered_ = false;
   uint16_t tint_ = 0;
