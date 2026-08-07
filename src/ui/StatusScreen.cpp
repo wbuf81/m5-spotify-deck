@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "Anim.h"
+#include "daisy/DaisySprite.h"
 #include "Theme.h"
 
 namespace {
@@ -34,7 +35,7 @@ Copy copyFor(const AppState &st) {
       break;
   }
   if (!st.pb.has_device) return {"NO DEVICE", "start playback anywhere", false};
-  return {"NOTHING PLAYING", "waiting", false};
+  return {"NOTHING PLAYING", "daisy is napping too", false};
 }
 
 }  // namespace
@@ -137,8 +138,28 @@ void StatusScreen::render(const AppState &st, uint32_t now_ms) {
     M5.Display.print(hint);
   }
 
-  // The beacon animates continuously, so it repaints every frame regardless.
-  drawBeacon(st, now_ms);
+  // Nothing playing while healthy is not a fault, so it does not get the
+  // radar beacon — it gets Daisy asleep, breathing on the sleep cycle. The
+  // beacon stays for connecting/offline/auth, where "still trying" is the
+  // message.
+  if (st.link == LinkStatus::Online) {
+    constexpr int DS = 2;
+    constexpr int DX = (SCREEN_W - daisy::SPRITE_COLS * DS) / 2;
+    constexpr int DY = 22;
+    const int f = daisy::frameAt(daisy::Daisy_Sleep, now_ms);
+    if (changed || daisy_frame_ < 0) {
+      release();  // the beacon sprite is not needed while she is on screen
+      daisy::draw(daisy::Daisy_Sleep, f, DX, DY, DS, pal.bg);
+    } else if (f != daisy_frame_) {
+      daisy::drawDiff(daisy::Daisy_Sleep, daisy_frame_, daisy::Daisy_Sleep, f,
+                      DX, DY, DS, pal.bg);
+    }
+    daisy_frame_ = f;
+  } else {
+    daisy_frame_ = -1;
+    // The beacon animates continuously, so it repaints every frame regardless.
+    drawBeacon(st, now_ms);
+  }
 
   last_link_ = st.link;
   last_has_track_ = st.pb.has_track;

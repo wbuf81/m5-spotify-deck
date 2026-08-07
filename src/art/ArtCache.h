@@ -4,8 +4,9 @@
 //
 // A cache hit means a track change repaints with no network access at all. On
 // the device this directory lives on the SD card; in the emulator it is a local
-// folder. No eviction: at ~25KB a cover, filling a 16GB card takes north of half
-// a million distinct albums.
+// folder. Capped at a few hundred covers, oldest evicted at boot — not because
+// the card would fill (half a million covers would), but so the directory scan
+// and the cache stay bounded on a device that runs for years.
 
 #include <string>
 

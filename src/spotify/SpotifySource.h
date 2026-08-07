@@ -35,6 +35,15 @@ class SpotifySource {
   // stale snapshot and would undo the UI's progress extrapolation.
   bool polledThisStep() const { return polled_; }
 
+  // Screen-asleep hint from the UI. While set, the paused/idle poll stretches
+  // to POLL_ASLEEP_MS — nobody is looking, so 5s polling all night is pure
+  // Spotify traffic for nothing. Net thread only.
+  void setIdlePoll(bool idle) { idle_poll_ = idle; }
+
+  // Poll now rather than waiting out the current interval. Called on wake, so
+  // the first frame someone sees is never up to 20s stale.
+  void nudge() { next_poll_.disarm(); }
+
  private:
   bool authHeaders(std::vector<std::string> *headers, uint32_t now_ms);
   bool call(const char *method, const std::string &url, const std::string &body,
@@ -72,4 +81,6 @@ class SpotifySource {
   // Cleared permanently once /me/tracks/contains answers 403: the restriction
   // is per-app, so retrying every poll would just burn rate limit forever.
   bool liked_supported_ = true;
+
+  bool idle_poll_ = false;
 };

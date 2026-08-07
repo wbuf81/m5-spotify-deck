@@ -20,6 +20,15 @@ struct AppState {
   PlaybackState pb;
   LinkStatus link = LinkStatus::Booting;
 
+  // Battery, sampled on the UI thread rather than published by a source: it is
+  // a property of the board, not of Spotify. -1 means no reading.
+  //
+  // There is deliberately no `charging` flag. The IP5306's charging bit just
+  // mirrors its charger-enable bit and reads true forever, so any behaviour
+  // built on it is built on noise — the field existing at all is how the
+  // battery badge once ended up permanently hidden.
+  int8_t battery_pct = -1;
+
   // Bumped every time a source publishes fresh data. The UI extrapolates
   // progress between publishes and resyncs only when this changes; without it
   // there is no way to distinguish a new poll from re-reading the same state.

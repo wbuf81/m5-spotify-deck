@@ -9,6 +9,4 @@ class PixelAlbumMode : public ViewMode {
   void enter(const AppState &st, const ViewCtx &ctx) override;
   void tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) override;
 
- private:
-  int last_sec_ = -1;
 };

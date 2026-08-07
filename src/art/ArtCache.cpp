@@ -1,9 +1,11 @@
 #include "ArtCache.h"
 
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include <cstdio>
+#include <cstring>
 
 #include "../net/HttpClient.h"
 #include "../net/NetLog.h"
@@ -28,6 +30,58 @@ bool safeId(const std::string &id) {
   return true;
 }
 
+// Covers accumulate one per album forever, so a long-lived device slowly
+// fills its card with art nobody will look at again. Capped by deleting the
+// oldest files (FAT mtime) once the count crosses the limit. Runs at boot
+// only: a scan of a few hundred dirents costs milliseconds, and bounding it
+// per-download would mean paying that scan on every album change instead.
+constexpr size_t CACHE_MAX_FILES = 300;
+
+void evictOldest(const std::string &dir) {
+  DIR *d = ::opendir(dir.c_str());
+  if (!d) return;
+
+  struct Entry {
+    time_t mtime;
+    char name[64];
+  };
+  // Two passes would need the file list in memory anyway; one pass with a
+  // fixed-size table keeps the worst case bounded.
+  static Entry entries[CACHE_MAX_FILES + 64];
+  size_t n = 0;
+
+  struct dirent *e;
+  while ((e = ::readdir(d)) != nullptr && n < CACHE_MAX_FILES + 64) {
+    if (e->d_name[0] == '.') continue;
+    if (!std::strstr(e->d_name, ".jpg")) continue;
+    struct stat st;
+    const std::string path = dir + "/" + e->d_name;
+    if (::stat(path.c_str(), &st) != 0) continue;
+    entries[n].mtime = st.st_mtime;
+    std::strncpy(entries[n].name, e->d_name, sizeof(entries[n].name) - 1);
+    entries[n].name[sizeof(entries[n].name) - 1] = '\0';
+    ++n;
+  }
+  ::closedir(d);
+
+  if (n <= CACHE_MAX_FILES) return;
+
+  // Selection sort on the oldest few: n is small and this runs once per boot.
+  const size_t excess = n - CACHE_MAX_FILES;
+  for (size_t k = 0; k < excess; ++k) {
+    size_t oldest = k;
+    for (size_t i = k + 1; i < n; ++i) {
+      if (entries[i].mtime < entries[oldest].mtime) oldest = i;
+    }
+    const Entry tmp = entries[k];
+    entries[k] = entries[oldest];
+    entries[oldest] = tmp;
+    const std::string victim = dir + "/" + entries[k].name;
+    std::remove(victim.c_str());
+  }
+  NETLOG("art cache: evicted %zu of %zu covers", excess, n);
+}
+
 }  // namespace
 
 void ArtCache::begin(const std::string &dir) {
@@ -42,6 +96,7 @@ void ArtCache::begin(const std::string &dir) {
     }
     if (i < dir_.size()) partial += dir_[i];
   }
+  evictOldest(dir_);
 }
 
 std::string ArtCache::cachedPath(const std::string &album_id) const {

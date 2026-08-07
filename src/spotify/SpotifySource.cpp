@@ -19,6 +19,7 @@ constexpr const char *API = "https://api.spotify.com/v1";
 // first two.
 constexpr uint32_t POLL_PLAYING_MS = 2000;
 constexpr uint32_t POLL_PAUSED_MS = 5000;
+constexpr uint32_t POLL_ASLEEP_MS = 20000;
 
 // Builds the filter that keeps the /me/player response from exhausting heap.
 // The raw payload carries available_markets arrays with hundreds of country
@@ -218,7 +219,7 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
     out->pb.has_track = false;
     out->pb.is_playing = false;
     polled_ = true;
-    next_poll_.arm(now_ms, POLL_PAUSED_MS);
+    next_poll_.arm(now_ms, idle_poll_ ? POLL_ASLEEP_MS : POLL_PAUSED_MS);
     return;
   }
   if (resp.status != 200) {
@@ -276,13 +277,16 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
     const std::string cached = art_.cachedPath(out->pb.album_id);
     if (!cached.empty()) {
       setStr(out->pb.art_path, PATH_LEN, cached.c_str());
+      out->pb.art_loading = false;
     } else {
       out->pb.art_path[0] = '\0';
+      out->pb.art_loading = true;
       pending_art_album_ = out->pb.album_id;
       pending_art_url_ = img;
     }
   } else {
     out->pb.art_path[0] = '\0';
+    out->pb.art_loading = false;
   }
 
   polled_ = true;
@@ -312,8 +316,9 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
     }
   }
 
-  next_poll_.arm(now_ms,
-                 out->pb.is_playing ? POLL_PLAYING_MS : POLL_PAUSED_MS);
+  next_poll_.arm(now_ms, out->pb.is_playing
+                             ? POLL_PLAYING_MS
+                             : (idle_poll_ ? POLL_ASLEEP_MS : POLL_PAUSED_MS));
 }
 
 void SpotifySource::refreshLiked(AppState *out, uint32_t now_ms) {
@@ -462,10 +467,12 @@ void SpotifySource::step(AppState *out, CommandQueue<> *cmds, uint32_t now_ms) {
       const std::string path = art_.ensure(album, url);
       NETLOG("artwork fetch %ums%s", (unsigned)(nowMs() - t0),
              path.empty() ? " (failed)" : "");
-      if (!path.empty() && album == out->pb.album_id) {
-        setStr(out->pb.art_path, PATH_LEN, path.c_str());
-        // Publish it: the merge only copies when a poll happened.
-        polled_ = true;
+      // Publish the outcome either way: leaving art_loading set on failure
+      // would freeze the placeholder on screen for the rest of the track.
+      if (album == out->pb.album_id) {
+        if (!path.empty()) setStr(out->pb.art_path, PATH_LEN, path.c_str());
+        out->pb.art_loading = false;
+        polled_ = true;  // the merge only copies when a poll happened
       }
       return;
     }

@@ -50,7 +50,7 @@ class ScenePanel {
   void release();
   const char *currentName() const;
 
-  static constexpr int SCENE_COUNT = 4;
+  static constexpr int SCENE_COUNT = 3;
 
  private:
   void ensure();

@@ -63,20 +63,20 @@ void SynthwaveMode::enter(const AppState &st, const ViewCtx &ctx) {
                                              0.2f + 0.5f * ((i % 5) / 5.0f)));
   }
 
+  // Title in the sky, top-left, clear of the sun's column. The transport used
+  // to live under the horizon; that space belongs to the shared strip now.
   M5.Display.setFont(theme::fontArtist());
   M5.Display.setTextColor(theme::pal.text, theme::pal.bg);
   char lines[1][WRAP_MAX_LINE];
-  // Timecodes sit at x=232.
   wrapText(st.pb.title, 210, lines, 1);
-  M5.Display.setCursor(10, 196);
+  M5.Display.setCursor(10, 8);
   M5.Display.print(lines[0]);
   M5.Display.setFont(theme::fontSmall());
   M5.Display.setTextColor(theme::pal.dim, theme::pal.bg);
   wrapText(st.pb.artist, 210, lines, 1);
-  M5.Display.setCursor(10, 218);
+  M5.Display.setCursor(10, 26);
   M5.Display.print(lines[0]);
 
-  last_sec_ = -1;
   last_sun_y_ = -1000;
   last_ms_ = 0;
 }
@@ -106,35 +106,20 @@ void SynthwaveMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms
   }
 
   // Ground: horizon line plus a perspective grid scrolling toward the viewer.
-  M5.Display.fillRect(0, HORIZON, 320, 190 - HORIZON, theme::pal.bg);
+  M5.Display.fillRect(0, HORIZON, 320, theme::STRIP_Y - HORIZON, theme::pal.bg);
   M5.Display.drawFastHLine(0, HORIZON, 320, ctx.tint);
   for (int i = -7; i <= 7; ++i) {
-    M5.Display.drawLine(160 + i * 46, 190, 160 + i * 5, HORIZON,
+    M5.Display.drawLine(160 + i * 46, theme::STRIP_Y - 1, 160 + i * 5, HORIZON,
                         anim::lerp565(theme::pal.bg, ctx.tint, 0.30f));
   }
   const float scroll = std::fmod(clock_ * 0.4f, 1.0f);
   for (int k = 0; k < 7; ++k) {
     float t = (k + scroll) / 7.0f;
     if (t > 1.0f) t -= 1.0f;
-    const int y = HORIZON + static_cast<int>((190 - HORIZON) * t * t);
-    if (y <= HORIZON || y >= 190) continue;
+    const int y = HORIZON + static_cast<int>((theme::STRIP_Y - HORIZON) * t * t);
+    if (y <= HORIZON || y >= theme::STRIP_Y) continue;
     M5.Display.drawFastHLine(0, y, 320,
                              anim::lerp565(theme::pal.bg, ctx.tint, 0.2f + 0.5f * t));
   }
 
-  const int sec = static_cast<int>(st.pb.progress_ms / 1000);
-  if (sec != last_sec_) {
-    last_sec_ = sec;
-    char buf[16], pad[16];
-    M5.Display.setFont(theme::fontSmall());
-    M5.Display.setTextColor(theme::pal.dim, theme::pal.bg);
-    formatElapsed(st.pb.progress_ms, buf, sizeof(buf));
-    std::snprintf(pad, sizeof(pad), "%-7s", buf);
-    M5.Display.setCursor(232, 196);
-    M5.Display.print(pad);
-    formatRemaining(st.pb.progress_ms, st.pb.duration_ms, buf, sizeof(buf));
-    std::snprintf(pad, sizeof(pad), "%7s", buf);
-    M5.Display.setCursor(232, 218);
-    M5.Display.print(pad);
-  }
 }

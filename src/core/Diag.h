@@ -11,13 +11,17 @@
 
 void bootBanner(bool sd_ok);
 
-// Hardware watchdog.
+// Hardware watchdog — for the UI task ONLY.
 //
-// When the display deadlocked on the shared SPI bus, the device did not reboot
-// — it sat frozen until someone unplugged it. That is the difference between a
-// gadget you own and one you gave away: nobody else is going to power-cycle it
-// for you. Every long-lived task subscribes, and a task that stops feeding
-// causes a reboot rather than a permanent freeze.
+// The first version subscribed the net task too and put the device into a
+// reboot loop every 30 seconds. That was a design error, not a tuning one: the
+// net task legitimately blocks on network I/O, and a single request could hold
+// it for connect-timeout plus read-timeout. A watchdog is for code that must
+// never block, and the render loop is exactly that — it runs at hundreds of
+// frames a second and any stall is a genuine hang, like the SPI bus deadlock
+// that started all this.
+//
+// The net task gets a heartbeat instead; see NetWorker::stalled().
 void watchdogBegin();
 void watchdogSubscribe();
 void watchdogFeed();

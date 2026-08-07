@@ -24,7 +24,12 @@ BIN = os.path.join(ROOT, ".pio", "build", "native", "program")
 
 # Regions, matching src/ui/Theme.h
 ART = (8, 8, 176, 176)
-HEART = (185, 165, 24, 24)
+# Heart lives in the shared StatusStrip now, between elapsed and the glyph.
+HEART = (96, 204, 24, 24)
+# Speaker + volume figure in the strip.
+VOLUME = (196, 206, 60, 18)
+# Progress bar row in the strip.
+BARROW = (8, 200, 304, 3)
 ROW = (0, 206, 320, 34)
 LEFT_TIME = (8, 208, 46, 18)
 RIGHT_TIME = (250, 208, 62, 18)
@@ -33,6 +38,8 @@ VIS = (192, 114, 120, 50)
 TEXT_TOP = (192, 8, 120, 26)
 # Beacon sprite on the status screen: 96x96, centred, pushed at y=18.
 BEACON = (112, 18, 96, 96)
+# Battery glyph in the StatusStrip, between the play glyph and the volume.
+BATTERY = (174, 212, 22, 14)
 
 
 def read_bmp(path):
@@ -199,10 +206,68 @@ def artwork_renders_and_stays_in_its_box(tmp):
 
 
 @case
+def loading_artwork_says_fetching_not_missing(tmp):
+    """A cover in flight must not be reported as absent."""
+    px = run({"EMU_ARTLOADING": "1", "EMU_EXIT_MS": "900"}, tmp("art_loading"))
+    # The vinyl's label is drawn in the tint, which falls back to accent green
+    # when no cover exists yet. The failure block contains no green at all, so
+    # the label is the discriminator.
+    green = count(px, ART, is_green)
+    assert green > 300, f"vinyl label missing ({green} green px) — failure block?"
+    lit = count(px, ART, lambda p: sum(p) > 90)
+    assert lit > 800, f"vinyl placeholder not drawn ({lit} lit px)"
+
+
+@case
+def liking_sends_daisy_across_the_strip(tmp):
+    """A like triggers Daisy's victory lap along the bottom strip."""
+    def whiteish(p):
+        r, g, b = p
+        return r > 200 and g > 200 and b > 170
+    # Mid-run: fired at 400ms, sampled ~750ms in — she is around x=110.
+    mid = run({"EMU_TRACK": "1", "EMU_FIRE": "like", "EMU_FIRE_MS": "400",
+               "EMU_EXIT_MS": "900"}, tmp("lap_mid"))
+    lap = count(mid, (40, 194, 55, 44), whiteish)
+    assert lap > 15, f"no Daisy in the strip mid-run ({lap} white px)"
+
+
+@case
+def liking_runs_daisy_on_mode_views_too(tmp):
+    """The celebration must follow the user to whatever view is up."""
+    def whiteish(p):
+        r, g, b = p
+        return r > 200 and g > 200 and b > 170
+    # Synthwave pinned; its lower third is dark grid lines, so her white chest
+    # stands out. Fired at 400ms, sampled ~750ms in.
+    mid = run({"EMU_MODE": "4", "EMU_TRACK": "1", "EMU_FIRE": "like",
+               "EMU_FIRE_MS": "400", "EMU_EXIT_MS": "900"}, tmp("lap_mode"))
+    lap = count(mid, (40, 194, 55, 44), whiteish)
+    assert lap > 15, f"no Daisy on the mode view mid-run ({lap} white px)"
+
+
+@case
+def daisy_lap_leaves_no_residue(tmp):
+    """After the lap the strip must be rebuilt: bar, times, glyph, no dog."""
+    def whiteish(p):
+        r, g, b = p
+        return r > 200 and g > 200 and b > 170
+    px = run({"EMU_TRACK": "1", "EMU_FIRE": "like", "EMU_FIRE_MS": "400",
+              "EMU_EXIT_MS": "2900"}, tmp("lap_done"))
+    # Left of the glyph there is nothing bright in a healthy row; any white
+    # here is a piece of dog.
+    residue = count(px, (0, 228, 140, 12), whiteish)
+    assert residue == 0, f"{residue} white pixels left behind after the lap"
+    assert count(px, GLYPH, is_bright) > 20, "play glyph missing after the lap"
+    assert region(px, LEFT_TIME) != [], "sanity"
+
+
+@case
 def liking_turns_the_heart_green(tmp):
     """Fixture 1 starts unliked, so this is a real transition."""
+    # The like also launches Daisy's lap, which tramples the heart while she
+    # crosses it; sample after the lap ends and the strip has rebuilt.
     px = run({"EMU_TRACK": "1", "EMU_FIRE": "like",
-              "EMU_FIRE_MS": "400", "EMU_EXIT_MS": "1200"}, tmp("liked"))
+              "EMU_FIRE_MS": "400", "EMU_EXIT_MS": "2900"}, tmp("liked"))
     g = count(px, HEART, is_green)
     assert g > 25, f"heart not filled after like ({g} green pixels)"
 
@@ -225,17 +290,17 @@ def scene_animates_while_playing(tmp):
 
 
 @case
-def all_four_scenes_render_and_differ(tmp):
+def all_scenes_render_and_differ(tmp):
     """Each scene must draw something, and none may look like another."""
     frames = {}
-    for n in range(4):
+    for n in range(3):
         px = run({"EMU_SCENE": str(n), "EMU_EXIT_MS": "2600"}, tmp(f"scene{n}"))
         lit = sum(1 for p in region(px, VIS) if sum(p) > 60)
         assert lit > 40, f"scene {n} rendered almost nothing ({lit} lit pixels)"
         frames[n] = region(px, VIS)
 
-    for a in range(4):
-        for b in range(a + 1, 4):
+    for a in range(3):
+        for b in range(a + 1, 3):
             assert frames[a] != frames[b], f"scenes {a} and {b} render identically"
 
 
@@ -319,13 +384,12 @@ def dimming_darkens_artwork_as_well_as_text(tmp):
         f"({art_ratio:.2f} vs {text_ratio:.2f})")
 
 
-MODE_NAMES = ["classic", "pixel", "gameboy", "cassette", "scoreboard",
-              "cyberdeck", "synthwave"]
+MODE_NAMES = ["classic", "pixel", "gameboy", "cyberdeck", "synthwave", "daisy", "snes", "nes"]
 
 
 @case
 def every_view_mode_renders_something_distinct(tmp):
-    """All seven modes must draw, and none may be mistakable for another."""
+    """All modes must draw, and none may be mistakable for another."""
     frames = {}
     for n, name in enumerate(MODE_NAMES):
         px = run({"EMU_MODE": str(n), "EMU_EXIT_MS": "2600"}, tmp(f"mode{n}"))
@@ -444,6 +508,78 @@ def nothing_playing_shows_status_not_a_blank_screen(tmp):
 
 
 # ---------------------------------------------------------------------------
+
+
+@case
+def battery_glyph_shows_the_level(tmp):
+    """The strip battery must be present, and must read differently when low."""
+    full = run({"EMU_BATTERY": "100", "EMU_EXIT_MS": "1200"}, tmp("bat_full"))
+    low = run({"EMU_BATTERY": "25", "EMU_EXIT_MS": "1200"}, tmp("bat_low"))
+
+    assert count(full, BATTERY, is_green) > 8, \
+        "a full pack should read as green"
+    assert count(low, BATTERY, is_amber) > 8, \
+        "a low pack should read as a warning colour"
+    assert region(full, BATTERY) != region(low, BATTERY), \
+        "100% and 25% render identically"
+
+
+@case
+def battery_glyph_hidden_without_a_reading(tmp):
+    """-1 means unknown, and a fake 0% would read as a flat battery."""
+    none = run({"EMU_BATTERY": "-1", "EMU_EXIT_MS": "1200"}, tmp("bat_none"))
+    some = run({"EMU_BATTERY": "75", "EMU_EXIT_MS": "1200"}, tmp("bat_some"))
+    assert region(none, BATTERY) != region(some, BATTERY), \
+        "an absent reading should not draw the same glyph as a real one"
+
+
+@case
+def every_view_shows_the_full_transport(tmp):
+    """The point of the shared strip: play state, heart, bar, volume and
+    battery must read identically on every view."""
+    for n, name in enumerate(MODE_NAMES):
+        a = run({"EMU_MODE": str(n), "EMU_TRACK": "0", "EMU_BATTERY": "50", "EMU_EXIT_MS": "1400"},
+                tmp(f"tp_{name}_a"))
+        b = run({"EMU_MODE": str(n), "EMU_TRACK": "0", "EMU_BATTERY": "50", "EMU_EXIT_MS": "2900"},
+                tmp(f"tp_{name}_b"))
+
+        assert count(a, GLYPH, is_bright) > 20, \
+            f"{name}: play glyph missing"
+        assert count(a, HEART, is_green) > 12, \
+            f"{name}: liked track shows no green heart"
+        vol_px = count(a, VOLUME, lambda p: sum(p) > 150)
+        assert vol_px > 15, f"{name}: volume label missing ({vol_px} px)"
+        assert count(a, BATTERY, is_amber) + count(a, BATTERY, is_green) > 6, \
+            f"{name}: battery badge missing"
+        assert region(a, BARROW) != region(b, BARROW), \
+            f"{name}: progress bar frozen across 1.5s of playback"
+        assert region(a, LEFT_TIME) != region(b, LEFT_TIME), \
+            f"{name}: elapsed time frozen"
+
+
+@case
+def unliked_track_shows_hollow_heart_everywhere(tmp):
+    """Fixture t2 is unliked: the heart must not read green on any view."""
+    for n, name in enumerate(MODE_NAMES):
+        px = run({"EMU_MODE": str(n), "EMU_TRACK": "1", "EMU_EXIT_MS": "1200"},
+                 tmp(f"uh_{name}"))
+        g = count(px, HEART, is_green)
+        assert g == 0, f"{name}: {g} green px on an unliked track"
+
+
+@case
+def setup_portal_screen_renders(tmp):
+    """EMU_PORTAL previews the captive-portal instructions and join QR."""
+    px = run({"EMU_PORTAL": "1", "EMU_EXIT_MS": "900"}, tmp("portal"))
+    # The QR sits on a white plate top-right; a valid one is roughly half
+    # dark. The library's broken accessor drew ~5% — this bound catches that.
+    box = (203, 38, 100, 100)
+    white = count(px, box, lambda p: sum(p) > 600)
+    dark = count(px, box, lambda p: sum(p) < 150)
+    assert white > 2000, f"QR quiet plate missing ({white} white px)"
+    assert dark > 1500, f"QR not drawn or sparse ({dark} dark px)"
+    # Headline present
+    assert count(px, (0, 0, 200, 36), is_green) > 40, "SETUP MODE headline missing"
 
 
 def main():

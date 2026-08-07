@@ -24,7 +24,9 @@ class HeartIndicator {
 
   // known == false draws nothing at all: a dim heart would assert "not liked",
   // which cannot be claimed when the API declines to answer.
-  void render(bool known, bool liked, uint32_t now_ms);
+  // ox/oy position the 24px sprite; bg is what its empty pixels paint.
+  void render(bool known, bool liked, uint32_t now_ms, int ox, int oy,
+              uint16_t bg);
   void release();
 
  private:

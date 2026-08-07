@@ -37,6 +37,7 @@ inline void mergePlayback(AppState *dst, const AppState &src, bool polled,
   setStr(dst->pb.title, TEXT_LEN, src.pb.title);
   setStr(dst->pb.artist, TEXT_LEN, src.pb.artist);
   setStr(dst->pb.art_path, PATH_LEN, src.pb.art_path);
+  dst->pb.art_loading = src.pb.art_loading;
   dst->pb.has_track = src.pb.has_track;
   dst->pb.has_device = src.pb.has_device;
   dst->pb.duration_ms = src.pb.duration_ms;

@@ -45,6 +45,14 @@ void FakeSource::loadTrack(int index, uint32_t now_ms) {
   setStr(remote_.title, TEXT_LEN, f.title);
   setStr(remote_.artist, TEXT_LEN, f.artist);
   setStr(remote_.art_path, PATH_LEN, f.art);
+#if defined(EMULATOR)
+  // EMU_ARTLOADING=1 renders every fixture as a cover still in flight, so the
+  // fetching placeholder can be reviewed and pixel-tested.
+  if (std::getenv("EMU_ARTLOADING")) {
+    remote_.art_path[0] = '\0';
+    remote_.art_loading = true;
+  }
+#endif
   remote_.duration_ms = f.duration_ms;
   remote_.progress_ms = 0;
   remote_.liked = f.liked;
@@ -104,6 +112,7 @@ void FakeSource::publish(AppState *st, uint32_t now_ms) {
   setStr(st->pb.title, TEXT_LEN, remote_.title);
   setStr(st->pb.artist, TEXT_LEN, remote_.artist);
   setStr(st->pb.art_path, PATH_LEN, remote_.art_path);
+  st->pb.art_loading = remote_.art_loading;
   st->pb.has_track = remote_.has_track;
   st->pb.has_device = remote_.has_device;
   st->pb.duration_ms = remote_.duration_ms;

@@ -32,8 +32,8 @@ bool g_checked = false;
 uint8_t g_prev[SDL_NUM_SCANCODES] = {};
 char g_note[64] = "ready";
 
-const char *MODE_NAMES[] = {"classic", "pixel",     "gameboy", "cassette",
-                            "scoreboard", "cyberdeck", "synthwave"};
+const char *MODE_NAMES[] = {"classic",   "pixel", "gameboy", "cyberdeck",
+                            "synthwave", "daisy", "snes",    "nes"};
 
 const char *LINK_NAMES[] = {"booting", "connecting", "online",
                             "offline", "autherror",  "reauth"};
@@ -68,8 +68,8 @@ void printKeymap() {
   std::fprintf(stderr,
       "\n"
       "  ── review harness ───────────────────────────────────────────\n"
-      "   1..7   pin view: classic pixel gameboy cassette scoreboard\n"
-      "                    cyberdeck synthwave\n"
+      "   1..8   pin view: classic pixel gameboy cyberdeck\n"
+      "                    synthwave daisy snes nes\n"
       "   0      unpin (rotate per track)\n"
       "   [ ]    previous / next fixture track\n"
       "   , .    scrub -10s / +10s      m  jump to near the end\n"
@@ -141,10 +141,10 @@ const Overrides &update(AppState *st, uint32_t now_ms) {
   const Uint8 *ks = SDL_GetKeyboardState(nullptr);
   if (!ks) return g_ov;
 
-  static const SDL_Scancode MODE_KEYS[7] = {
+  static const SDL_Scancode MODE_KEYS[8] = {
       SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4,
-      SDL_SCANCODE_5, SDL_SCANCODE_6, SDL_SCANCODE_7};
-  for (int i = 0; i < 7; ++i) {
+      SDL_SCANCODE_5, SDL_SCANCODE_6, SDL_SCANCODE_7, SDL_SCANCODE_8};
+  for (int i = 0; i < 8; ++i) {
     if (justPressed(ks, MODE_KEYS[i])) {
       g_screen.pin(i - 1);  // -1 == classic
       note("pinned %s", MODE_NAMES[i]);
@@ -165,7 +165,7 @@ const Overrides &update(AppState *st, uint32_t now_ms) {
   }
 
   // Scrubbing is the point of the harness for anything progress-driven — the
-  // cassette reels, the sinking sun, the scoreboard clock.
+  // the sinking sun, the cyberdeck ticker.
   if (justPressed(ks, SDL_SCANCODE_PERIOD)) {
     uint32_t v = g_clock.value() + 10000;
     if (st->pb.duration_ms && v > st->pb.duration_ms) v = st->pb.duration_ms;

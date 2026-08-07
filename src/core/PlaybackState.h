@@ -28,6 +28,12 @@ struct PlaybackState {
   // flat block rather than failing.
   char art_path[PATH_LEN] = {};
 
+  // True while a cover download is in flight for the current album. Lets the
+  // UI say "fetching" instead of "no artwork" — the old message claimed
+  // failure during the one or two seconds every uncached album spends
+  // downloading, which made a working device look broken.
+  bool art_loading = false;
+
   uint32_t duration_ms = 0;
   uint32_t progress_ms = 0;
 

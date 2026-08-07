@@ -14,6 +14,7 @@
 // Ownership rule on both platforms: the net task never holds the lock while
 // doing I/O. It snapshots under lock, works on its own copy, then merges.
 
+#include <atomic>
 #include <mutex>
 #include <string>
 
@@ -46,6 +47,20 @@ class NetWorker {
   // UI side: copy the shared state out for rendering.
   AppState snapshot();
 
+  // UI side: the screen went to sleep or woke. Asleep stretches the poll
+  // interval; waking forces an immediate poll so the screen never shows stale
+  // state after a button press.
+  void setScreenAsleep(bool asleep) {
+    const bool was = screen_asleep_.exchange(asleep);
+    if (was && !asleep) wake_nudge_.store(true);
+  }
+
+  // True when the net task has not completed an iteration for far longer than
+  // any legitimate network operation. It is deliberately not on the hardware
+  // watchdog — it is allowed to block for seconds — so this is how a genuine
+  // wedge gets noticed.
+  bool stalled(uint32_t now_ms) const;
+
   // UI side: apply a locally-optimistic edit under the same lock the net task
   // merges with, so the two cannot interleave mid-update.
   template <typename Fn>
@@ -64,6 +79,9 @@ class NetWorker {
   const char *password_ = nullptr;
   bool source_started_ = false;
 
+  std::atomic<uint32_t> heartbeat_ms_{0};
+  std::atomic<bool> screen_asleep_{false};
+  std::atomic<bool> wake_nudge_{false};
   std::mutex mtx_;
   AppState state_;
   CommandQueue<> cmds_;

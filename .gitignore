@@ -7,3 +7,6 @@ src/config/secrets.h
 *.bmp
 emu-frame.*
 .cache/
+venv/
+*.pyc
+__pycache__/

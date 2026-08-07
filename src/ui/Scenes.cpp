@@ -1,4 +1,5 @@
 #include "Scenes.h"
+#include "../core/Hash.h"
 
 #include <cmath>
 #include <cstdio>
@@ -16,16 +17,6 @@ using theme::VIS_W;
 
 // Deterministic hashes. Every "random" value here is derived from stable
 // inputs, so a scene looks identical on every run — which is what lets the
-// visual tests assert on it at all.
-uint32_t fnv1a(const char *s) {
-  uint32_t h = 2166136261u;
-  while (s && *s) {
-    h ^= static_cast<uint8_t>(*s++);
-    h *= 16777619u;
-  }
-  return h;
-}
-
 uint32_t mix(uint32_t a, uint32_t b) {
   uint32_t h = a ^ (b + 0x9e3779b9u + (a << 6) + (a >> 2));
   h ^= h >> 15;
@@ -152,73 +143,6 @@ class StarfieldScene : public Scene {
 };
 
 // ---------------------------------------------------------------------------
-// Neon city: silhouetted skyline, flickering windows, album-tinted skyglow.
-// ---------------------------------------------------------------------------
-class CityScene : public Scene {
- public:
-  void reset(uint32_t seed) override { seed_ = seed; }
-  const char *name() const override { return "city"; }
-
-  void render(M5Canvas *cv, const SceneCtx &ctx) override {
-    // Skyglow.
-    for (int y = 0; y < VIS_H; ++y) {
-      const float f = 1.0f - (float(y) / VIS_H);
-      cv->drawFastHLine(0, y, VIS_W, dim(ctx.tint, 0.05f + 0.16f * f * f));
-    }
-
-    // Deterministic skyline, wide enough to scroll and wrap.
-    constexpr int COUNT = 22;
-    int widths[COUNT];
-    int heights[COUNT];
-    int total = 0;
-    for (int b = 0; b < COUNT; ++b) {
-      const uint32_t h = mix(seed_, b);
-      widths[b] = 7 + static_cast<int>(unit(h) * 9);
-      heights[b] = 12 + static_cast<int>(unit(h >> 9) * 30);
-      total += widths[b];
-    }
-
-    // Slow parallax drift, so the scene is continuously in motion rather than
-    // only changing when a window happens to re-roll.
-    const float scroll = std::fmod(ctx.clock * 3.5f, static_cast<float>(total));
-
-    // Windows re-roll on a coarse time bucket: cheap, stateless, and stable
-    // enough that they twinkle rather than strobe.
-    const int bucket = static_cast<int>(ctx.clock * 2.5f);
-
-    for (int pass = 0; pass < 2; ++pass) {
-      int x = static_cast<int>(-scroll) + pass * total;
-      for (int b = 0; b < COUNT; ++b) {
-        const int w = widths[b];
-        const int ht = heights[b];
-        const int top = VIS_H - ht;
-
-        if (x + w >= 0 && x < VIS_W) {
-          const uint32_t h = mix(seed_, b);
-          cv->fillRect(x, top, w - 2, ht, theme::pal.bg);
-          cv->drawRect(x, top, w - 2, ht, dim(ctx.tint, 0.30f));
-
-          for (int wy = top + 3; wy < VIS_H - 3; wy += 4) {
-            for (int wx = x + 2; wx < x + w - 4; wx += 4) {
-              if (wx < 0 || wx >= VIS_W - 1) continue;
-              const uint32_t wh = mix(mix(h, b * 977 + wy), bucket);
-              if ((wh & 7) < 3) {
-                cv->fillRect(wx, wy, 2, 2,
-                             dim(ctx.tint, 0.55f + 0.45f * unit(wh >> 4)));
-              }
-            }
-          }
-        }
-        x += w;
-      }
-    }
-  }
-
- private:
-  uint32_t seed_ = 0;
-};
-
-// ---------------------------------------------------------------------------
 // Orbiting planet: the moon completes exactly one orbit per track, so its
 // position genuinely is the progress.
 // ---------------------------------------------------------------------------
@@ -270,7 +194,6 @@ class PlanetScene : public Scene {
 
 SynthwaveScene g_synth;
 StarfieldScene g_stars;
-CityScene g_city;
 PlanetScene g_planet;
 
 }  // namespace
@@ -291,8 +214,7 @@ void ScenePanel::ensure() {
 
   scenes_[0] = &g_synth;
   scenes_[1] = &g_stars;
-  scenes_[2] = &g_city;
-  scenes_[3] = &g_planet;
+  scenes_[2] = &g_planet;
   for (auto *s : scenes_) s->reset(0x5eed);
 }
 

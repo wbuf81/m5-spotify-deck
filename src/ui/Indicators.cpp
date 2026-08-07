@@ -89,19 +89,17 @@ void HeartIndicator::trigger(bool liking, uint32_t now_ms) {
 
 void HeartIndicator::release() { freeSprite(&cv_); }
 
-void HeartIndicator::render(bool known, bool liked, uint32_t now_ms) {
+void HeartIndicator::render(bool known, bool liked, uint32_t now_ms, int ox,
+                            int oy, uint16_t bg) {
   using namespace theme;
   if (!cv_) cv_ = makeSprite(HEART_CV, HEART_CV);
   if (!cv_) return;
 
-  const int foot_y = COL_Y + COL_H - FOOT_H;
-  // Placed so the ring at full radius still clears the artwork's right edge.
-  const int ox = COL_X - 7;
-  const int oy = foot_y - 5;
-  const float cx = static_cast<float>(COL_X + 5 - ox);
-  const float cy = static_cast<float>(foot_y + 7 - oy);
+  // Centre of the sprite; the bloom ring at full radius stays inside it.
+  const float cx = HEART_CV / 2.0f;
+  const float cy = HEART_CV / 2.0f;
 
-  cv_->fillSprite(pal.bg);
+  cv_->fillSprite(bg);
 
   if (!known) {
     cv_->pushSprite(ox, oy);
@@ -122,7 +120,7 @@ void HeartIndicator::render(bool known, bool liked, uint32_t now_ms) {
       color = anim::lerp565(pal.bar_bg, pal.accent, anim::easeOutCubic(t));
 
       const int r = static_cast<int>(anim::lerp(3.0f, 11.0f, anim::easeOutCubic(t)));
-      const uint16_t ring = anim::lerp565(pal.accent, pal.bg, t);
+      const uint16_t ring = anim::lerp565(pal.accent, bg, t);
       cv_->drawCircle(static_cast<int>(cx), static_cast<int>(cy), r, ring);
       if (r > 1) cv_->drawCircle(static_cast<int>(cx), static_cast<int>(cy), r - 1, ring);
     } else {

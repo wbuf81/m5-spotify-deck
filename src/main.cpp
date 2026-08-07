@@ -14,6 +14,7 @@
 #include <M5Unified.h>
 
 #include "core/AppState.h"
+#include "core/Power.h"
 #include "core/Clock.h"
 #include "art/ArtRenderer.h"
 #include "core/Diag.h"
@@ -44,11 +45,21 @@
 #endif
 #endif
 
-#if defined(HAVE_SECRETS)
+// The device always compiles the live stack: its credentials can arrive from
+// the setup portal (NVS) with no secrets.h in the build at all. The emulator
+// still needs compiled secrets to go live — it has no portal.
+#if defined(HAVE_SECRETS) || !defined(EMULATOR)
+#include "config/DeviceConfig.h"
 #include "net/NetLog.h"
 #include "net/NetWorker.h"
 #include "platform/esp32/Esp32Storage.h"
 #define CAN_GO_LIVE 1
+#endif
+#if !defined(EMULATOR)
+#include "platform/esp32/Esp32Portal.h"
+#endif
+#if defined(EMULATOR)
+#include "ui/SetupScreen.h"
 #endif
 
 namespace {
@@ -89,6 +100,27 @@ bool confirmedPlaying(const AppState &st) {
   return st.link == LinkStatus::Online && st.pb.has_track && st.pb.is_playing;
 }
 
+#if defined(EMULATOR)
+// Two exit hooks. EMU_EXIT_MS is wall-clock and is the one to use when
+// waiting on the network: loop() runs as fast as SDL allows, so a frame count
+// can elapse in well under a second and kill the process mid-request.
+void emuExitTick(uint32_t now) {
+  bool quit = false;
+  if (const char *ms = std::getenv("EMU_EXIT_MS")) {
+    static const uint32_t started = now;
+    if (now - started >= static_cast<uint32_t>(std::atoi(ms))) quit = true;
+  }
+  if (const char *nstr = std::getenv("EMU_EXIT_AFTER")) {
+    static int frame = 0;
+    if (++frame >= std::atoi(nstr)) quit = true;
+  }
+  if (quit) {
+    if (const char *path = std::getenv("EMU_DUMP")) dumpFrameBmp(path);
+    std::exit(0);
+  }
+}
+#endif
+
 }  // namespace
 
 AppState g_state;
@@ -100,6 +132,13 @@ namespace {
 
 FakeSource g_fake;
 StatusScreen g_status;
+
+// The PMIC is on I2C and reports in 25% steps, so there is nothing to gain from
+// reading it faster than this.
+constexpr uint32_t POWER_SAMPLE_MS = 2000;
+uint32_t g_power_sampled_ms = 0;
+bool g_power_sampled = false;
+int8_t g_battery_pct = -1;
 bool g_showing_status = false;
 Buttons g_buttons;
 
@@ -115,6 +154,9 @@ uint8_t g_brightness = theme::BRIGHT_ACTIVE;
 
 bool g_volume_dirty = false;
 uint32_t g_volume_changed_at_ms = 0;
+#if defined(EMULATOR)
+bool g_portal_preview = false;
+#endif
 
 // Routes a command to whichever source is running.
 void submit(const Command &c) {
@@ -213,8 +255,10 @@ void handleButtons(uint32_t now_ms) {
       // We just set it, so we know it even if the API will not tell us.
       st.pb.liked_known = true;
       st.settle_liked.arm(now_ms, SETTLE_MS);
-      st.showToast(st.pb.liked ? "Saved to Liked Songs" : "Removed from Liked",
-                   now_ms);
+      // No toast: the heart animation and Daisy's lap ARE the feedback. The
+      // toast also blocked the lap outright — it owned the strip row, and the
+      // lap refused to start over an active toast, so on the classic screen
+      // the celebration never played.
     });
     submit({CommandType::ToggleLike, 0});
   }
@@ -260,9 +304,16 @@ void updateBrightness(uint32_t now_ms) {
   }
 #endif
   if (want != g_brightness) {
+    NETLOG("backlight %d -> %d (%s)", (int)g_brightness, (int)want,
+           want == theme::BRIGHT_OFF
+               ? "asleep"
+               : (want == theme::BRIGHT_IDLE ? "dim" : "active"));
     g_brightness = want;
     theme::applyBrightness(want);
     g_screen.invalidate();  // palette changed, everything on screen is stale
+#if defined(CAN_GO_LIVE)
+    if (g_net) g_net->setScreenAsleep(want == theme::BRIGHT_OFF);
+#endif
   }
 }
 
@@ -289,24 +340,41 @@ void setup(void) {
   g_not_playing_since_ms = now;
 
 #if defined(CAN_GO_LIVE)
+  // Lives for the whole run: NetWorker keeps pointers into it.
+  static DeviceConfig device_cfg;
+  device_cfg = DeviceConfig::load();
+
 #if defined(EMULATOR)
   const bool force_fake = std::getenv("EMU_FAKE") != nullptr;
   const char *cache_dir = ".cache/art";
 #else
+  // Setup portal: entered when the device has no complete configuration, or
+  // when button A is held through power-on (reconfigure at a friend's house).
+  // Before the watchdog, before the net task — the portal owns the device.
+  M5.update();
+  if (M5.BtnA.isPressed() || !device_cfg.complete()) {
+    Serial.println(M5.BtnA.isPressed() ? "portal    : requested (BtnA held)"
+                                       : "portal    : no configuration");
+    runSetupPortal(device_cfg);  // never returns
+  }
+
   const bool force_fake = false;
   // Arduino's SD library mounts at /sd through the ESP-IDF VFS, so the same
   // POSIX file code serves both platforms.
   const bool sd_ok = mountStorage();
+  powerBegin();
   bootBanner(sd_ok);
   watchdogBegin();
   watchdogSubscribe();
   const char *cache_dir = "/sd/art";
 #endif
-  if (!force_fake) {
+  if (!force_fake && device_cfg.complete()) {
     g_live = true;
-    g_net = new NetWorker(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
-                          SPOTIFY_REFRESH_TOKEN);
-    g_net->start(cache_dir, WIFI_SSID, WIFI_PASSWORD);
+    g_net = new NetWorker(device_cfg.client_id.c_str(),
+                          device_cfg.client_secret.c_str(),
+                          device_cfg.refresh_token.c_str());
+    g_net->start(cache_dir, device_cfg.wifi_ssid.c_str(),
+                 device_cfg.wifi_password.c_str());
     NETLOG("NetWorker started");
   }
 #endif
@@ -328,6 +396,12 @@ void setup(void) {
 
 #if defined(EMULATOR)
   if (harness::active()) harness::printKeymap();
+  // EMU_PORTAL=1 renders the setup screen so its layout is pixel-testable;
+  // the access point itself is hardware-only.
+  if (std::getenv("EMU_PORTAL")) {
+    setupscreen::draw("M5SPOTIFY-SETUP", "192.168.4.1");
+    g_portal_preview = true;
+  }
 #endif
 
   g_screen.invalidate();
@@ -337,6 +411,15 @@ void loop(void) {
   M5.update();
 
   const uint32_t now = nowMs();
+
+#if defined(EMULATOR)
+  // Portal preview holds the setup screen exactly as setup() drew it; only
+  // the exit hooks run so the visual suite can dump it.
+  if (g_portal_preview) {
+    emuExitTick(now);
+    return;
+  }
+#endif
   const uint32_t frame_dt = now - g_last_frame_ms;
   g_last_frame_ms = now;
 
@@ -351,6 +434,9 @@ void loop(void) {
       g_brightness = theme::BRIGHT_ACTIVE;
       theme::applyBrightness(g_brightness);
       g_screen.invalidate();
+#if defined(CAN_GO_LIVE)
+      if (g_net) g_net->setScreenAsleep(false);  // poll immediately on wake
+#endif
     } else {
       handleButtons(now);
     }
@@ -415,8 +501,28 @@ void loop(void) {
 #else
   updateBrightness(now);
 #endif
+  if (!g_power_sampled || (now - g_power_sampled_ms) >= POWER_SAMPLE_MS) {
+    g_power_sampled = true;
+    g_power_sampled_ms = now;
+    g_battery_pct = readPower().pct;
+  }
+  // Written after the snapshot so the net task's copy never clobbers it: the
+  // battery is the board's business, not Spotify's.
+  g_state.battery_pct = g_battery_pct;
+
   heapTick(now);
   watchdogFeed();
+
+#if defined(CAN_GO_LIVE) && !defined(EMULATOR)
+  // The net task is not on the hardware watchdog because it is allowed to
+  // block. If it stops entirely, restart deliberately rather than sit there
+  // showing stale data forever.
+  if (g_live && g_net && g_net->stalled(now)) {
+    NETLOG("net task stalled — restarting");
+    delay(50);
+    ESP.restart();
+  }
+#endif
 
 #if !defined(EMULATOR) && defined(TRACE_RENDER)
   // Frame rate, because "the screen is not working" and "the screen is
@@ -436,7 +542,8 @@ void loop(void) {
 
   if (g_brightness != theme::BRIGHT_OFF) {
     const bool want_status = StatusScreen::shouldShow(g_state);
-    if (want_status != g_showing_status) {
+    const bool screen_switched = want_status != g_showing_status;
+    if (screen_switched) {
       g_showing_status = want_status;
       // Switching screens leaves the whole panel stale. Also hand back the
       // hidden screen's sprites: the two are mutually exclusive, so only one
@@ -449,9 +556,13 @@ void loop(void) {
         g_status.release();
       }
     }
+    (void)screen_switched;
     if (want_status) {
       g_status.render(g_state, now);
     } else {
+      // Battery lives in the StatusStrip now, rendered by ViewManager along
+      // with the rest of the transport. The floating badge this replaced
+      // forced every view to lay out around one corner.
       g_screen.render(g_state, now);
     }
 #if defined(EMULATOR)
@@ -505,22 +616,7 @@ void loop(void) {
     else if (std::strcmp(l, "notrack") == 0) g_state.pb.has_track = false;
   }
 
-  // Two exit hooks. EMU_EXIT_MS is wall-clock and is the one to use when
-  // waiting on the network: loop() runs as fast as SDL allows, so a frame count
-  // can elapse in well under a second and kill the process mid-request.
-  bool quit = false;
-  if (const char *ms = std::getenv("EMU_EXIT_MS")) {
-    static const uint32_t started = now;
-    if (now - started >= static_cast<uint32_t>(std::atoi(ms))) quit = true;
-  }
-  if (const char *nstr = std::getenv("EMU_EXIT_AFTER")) {
-    static int frame = 0;
-    if (++frame >= std::atoi(nstr)) quit = true;
-  }
-  if (quit) {
-    if (const char *path = std::getenv("EMU_DUMP")) dumpFrameBmp(path);
-    std::exit(0);
-  }
+  emuExitTick(now);
 #endif
 }
 

@@ -1,5 +1,7 @@
 #include "NetWorker.h"
 
+#include <cstdint>
+
 #include "../core/Clock.h"
 #include "../core/Diag.h"
 #include "../core/MergePolicy.h"
@@ -17,6 +19,10 @@ namespace {
 // ~1.2s lag on next/previous. The loop is cheap — a mutex, a struct copy, and
 // a time comparison — so a faster tick costs almost nothing.
 constexpr uint32_t TICK_MS = 25;
+
+// Far beyond any real request — connect plus read timeouts total well under
+// this — so tripping it means the task is genuinely wedged.
+constexpr uint32_t NET_STALL_LIMIT_MS = 90000;
 
 #if !defined(EMULATOR)
 // mbedTLS handshakes are stack-hungry. The pthread default is nowhere near
@@ -36,6 +42,7 @@ void napMs(uint32_t ms) {
 }
 
 }  // namespace
+
 
 NetWorker::NetWorker(const char *client_id, const char *client_secret,
                      const char *refresh_token)
@@ -85,6 +92,22 @@ void NetWorker::submit(const Command &c) {
   }
 }
 
+bool NetWorker::stalled(uint32_t now_ms) const {
+  const uint32_t hb = heartbeat_ms_.load();
+  if (hb == 0) return false;  // not started yet
+
+  // now_ms is sampled at the top of the UI frame, and the net task keeps
+  // running while that frame renders, so the heartbeat can legitimately be
+  // NEWER than the timestamp we are asked about. Subtracting unsigned then
+  // gave ~4 billion and tripped the limit instantly. The slower the view, the
+  // wider that window: the pixel mode's full-screen redraw made it reboot the
+  // device mid-song. Treat any age in the top half of the range as "ahead of
+  // us", which is the same wrap-safe convention Deadline uses.
+  const uint32_t age = now_ms - hb;
+  if (age > (UINT32_MAX / 2)) return false;
+  return age > NET_STALL_LIMIT_MS;
+}
+
 AppState NetWorker::snapshot() {
   std::lock_guard<std::mutex> lk(mtx_);
   return state_;
@@ -106,12 +129,21 @@ void logLinkChange(LinkStatus s) {
 
 void NetWorker::run() {
   NETLOG("net task started");
-  watchdogSubscribe();
   wifi_.begin(ssid_, password_);
 
   while (running_) {
-    watchdogFeed();
     const uint32_t now = nowMs();
+    heartbeat_ms_.store(now);
+    {
+      // Proof of life, independent of whether any request succeeds. Silence
+      // here means the loop itself is wedged, which is a different problem to
+      // requests failing.
+      static uint32_t last = 0;
+      if (now - last > 60000) {
+        last = now;
+        NETLOG("net alive (uptime %us)", (unsigned)(now / 1000));
+      }
+    }
 
     if (!wifi_.ensureConnected(now)) {
       // No link yet. Publish the connection state so the status screen can be
@@ -133,6 +165,9 @@ void NetWorker::run() {
       Command c;
       while (cmds_.pop(&c)) local.push(c);
     }
+
+    source_.setIdlePoll(screen_asleep_.load());
+    if (wake_nudge_.exchange(false)) source_.nudge();
 
     // All network I/O happens here, holding no lock.
     source_.step(&scratch, &local, now);

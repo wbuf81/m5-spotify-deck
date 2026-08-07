@@ -15,10 +15,10 @@ namespace {
 constexpr uint32_t HEAP_FLOOR = 40000;
 constexpr uint32_t REPORT_EVERY_MS = 30000;
 
-// Generous on purpose. The UI normally runs at hundreds of frames a second,
-// but an artwork decode and a TLS handshake can each take a second or more, and
-// a watchdog that false-trips is worse than none.
-constexpr uint32_t WDT_TIMEOUT_S = 30;
+// The UI task only. It runs at hundreds of frames a second; the longest thing
+// it legitimately does is decode a cover off SD, well under a second. Ten
+// seconds is far beyond any honest stall and well short of a user's patience.
+constexpr uint32_t WDT_TIMEOUT_S = 10;
 
 // Survive this long and the boot is considered good.
 constexpr uint32_t STABLE_AFTER_MS = 120000;
@@ -45,7 +45,52 @@ const char *resetReasonName(esp_reset_reason_t r) {
 uint32_t crashStreak() { return g_crash_streak; }
 
 void watchdogBegin() {
-  esp_task_wdt_init(WDT_TIMEOUT_S, true);  // true: panic and reboot on timeout
+  // Arduino has already initialised the watchdog with its own timeout, and a
+  // second init is rejected rather than applied — so deinit first or the
+  // configured value here is silently ignored.
+  esp_task_wdt_deinit();
+  const esp_err_t err = esp_task_wdt_init(WDT_TIMEOUT_S, true);  // panic+reboot
+  Serial.printf("watchdog  : %us%s\n", WDT_TIMEOUT_S,
+                err == ESP_OK ? "" : " (init FAILED)");
+
+  // Power source and battery, printed once so a device that misbehaves on
+  // battery can be told apart from one with a real fault.
+  const int8_t lvl = M5.Power.getBatteryLevel();
+  const int32_t mv = M5.Power.getBatteryVoltage();
+  const auto chg = M5.Power.isCharging();
+  Serial.printf("power     : type=%d level=%d%% v=%dmV charging=%d\n",
+                (int)M5.Power.getType(), (int)lvl, (int)mv, (int)chg);
+
+  // Raw IP5306 registers.
+  //
+  // getBatteryLevel() reads the chip's LED gauge, which reports a cheerful
+  // 100% even with no cell attached, so it cannot answer "is there actually a
+  // battery here". These bits can: SYS_CTL0 says whether the boost converter
+  // is enabled and whether it stays up once USB is pulled, and SYS_CTL1 says
+  // whether the chip shuts itself off when it decides the load is too small.
+  constexpr uint8_t IP5306 = 0x75;
+  constexpr uint8_t IP5306_SYS_CTL0_R = 0x00;
+  constexpr uint32_t I2C_HZ = 100000;
+  const uint8_t ctl0 = M5.In_I2C.readRegister8(IP5306, 0x00, I2C_HZ);
+  const uint8_t ctl1 = M5.In_I2C.readRegister8(IP5306, 0x01, I2C_HZ);
+  const uint8_t ctl2 = M5.In_I2C.readRegister8(IP5306, 0x02, I2C_HZ);
+  const uint8_t rd0  = M5.In_I2C.readRegister8(IP5306, 0x70, I2C_HZ);
+  const uint8_t rd1  = M5.In_I2C.readRegister8(IP5306, 0x71, I2C_HZ);
+  const uint8_t rd4  = M5.In_I2C.readRegister8(IP5306, 0x78, I2C_HZ);
+  Serial.printf("ip5306    : CTL0=%02X CTL1=%02X CTL2=%02X RD0=%02X RD1=%02X RD4=%02X\n",
+                ctl0, ctl1, ctl2, rd0, rd1, rd4);
+  Serial.printf("            boost=%d keep-on=%d charger=%d low-load-off=%d\n",
+                (ctl0 >> 5) & 1, (ctl0 >> 1) & 1, (ctl0 >> 4) & 1,
+                (ctl1 >> 7) & 1);
+  // charge_done is the one that tells us a real cell is on the end of the
+  // wire. A 110mAh pack tops up in minutes; one that charges forever without
+  // ever completing is usually not there at all.
+  // charging= is NOT trustworthy: measured on this board, READ0 bit3 simply
+  // mirrors the charger-enable bit in SYS_CTL0 and stays 1 forever. Disabling
+  // the charger flips it; unplugging USB would not. Do not build behaviour on
+  // it — the strip's battery glyph ignores it entirely.
+  Serial.printf("            charging=%d charge_done=%d gauge_raw=%02X\n",
+                (rd0 >> 3) & 1, (rd1 >> 3) & 1, rd4 & 0xF0);
 }
 
 void watchdogSubscribe() { esp_task_wdt_add(nullptr); }
