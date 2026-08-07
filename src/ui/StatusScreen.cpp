@@ -127,15 +127,27 @@ void StatusScreen::render(const AppState &st, uint32_t now_ms) {
     M5.Display.setCursor((SCREEN_W - w) / 2, 164);
     M5.Display.print(c.detail);
 
-    // Keep the strip present so the device does not look like it crashed into
-    // a different layout entirely.
+    // The strip becomes the button legend, aligned with the three physical
+    // buttons below the panel. It shows exactly when a guest is staring at an
+    // idle device wondering what the buttons do — which the old "m5 spotify"
+    // wordmark answered for no one.
     M5.Display.fillRect(0, STRIP_Y, SCREEN_W, STRIP_H, pal.strip);
     M5.Display.setFont(fontSmall());
-    M5.Display.setTextColor(pal.bar_bg, pal.strip);
-    const char *hint = "m5 spotify";
-    w = M5.Display.textWidth(hint);
-    M5.Display.setCursor((SCREEN_W - w) / 2, TIME_Y + 2);
-    M5.Display.print(hint);
+    struct { int cx; const char *tap; const char *hold; } keys[3] = {
+        {65, "<< prev", "hold vol-"},
+        {160, "play", "hold like"},
+        {255, "next >>", "hold vol+"},
+    };
+    for (const auto &k : keys) {
+      M5.Display.setTextColor(pal.dim, pal.strip);
+      w = M5.Display.textWidth(k.tap);
+      M5.Display.setCursor(k.cx - w / 2, STRIP_Y + 8);
+      M5.Display.print(k.tap);
+      M5.Display.setTextColor(pal.bar_bg, pal.strip);
+      w = M5.Display.textWidth(k.hold);
+      M5.Display.setCursor(k.cx - w / 2, STRIP_Y + 26);
+      M5.Display.print(k.hold);
+    }
   }
 
   // Nothing playing while healthy is not a fault, so it does not get the
