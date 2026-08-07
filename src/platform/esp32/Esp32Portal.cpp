@@ -60,8 +60,13 @@ const char PAGE_SAVED[] =
     "<h1>Saved.</h1><p>The device is rebooting into player mode.</p>"
     "</body></html>";
 
-DNSServer g_dns;
-WebServer g_http(80);
+// Allocated only when the portal actually runs. As file-scope statics these
+// cost ~34KB of RAM on every normal boot — a quarter of the app's contiguous
+// headroom — for a mode most boots never enter, and the JPEG decoder was the
+// one paying for it ("no artwork" from failed decodes under fragmentation).
+// runSetupPortal never returns, so these intentionally live until the reboot.
+DNSServer *g_dns = nullptr;
+WebServer *g_http = nullptr;
 DeviceConfig g_current;
 std::string g_ssid_options;
 
@@ -111,29 +116,29 @@ void sendForm() {
   const size_t vat = tail.find("%VIEWS%");
   tail.replace(vat, 7, views);
   page += tail;
-  g_http.send(200, "text/html", page.c_str());
+  g_http->send(200, "text/html", page.c_str());
 }
 
 // Any URL that is not the portal redirects to it. This is what makes phones
 // pop the "sign in to network" sheet the moment they join the AP.
 void sendRedirect() {
-  g_http.sendHeader("Location", PORTAL_URL, true);
-  g_http.send(302, "text/plain", "");
+  g_http->sendHeader("Location", PORTAL_URL, true);
+  g_http->send(302, "text/plain", "");
 }
 
 void handleSave() {
   DeviceConfig next;
-  next.wifi_ssid = g_http.arg("ssid").c_str();
-  next.wifi_password = g_http.arg("pass").c_str();
-  next.client_id = g_http.arg("cid").c_str();
-  next.client_secret = g_http.arg("csec").c_str();
-  next.refresh_token = g_http.arg("rtok").c_str();
+  next.wifi_ssid = g_http->arg("ssid").c_str();
+  next.wifi_password = g_http->arg("pass").c_str();
+  next.client_id = g_http->arg("cid").c_str();
+  next.client_secret = g_http->arg("csec").c_str();
+  next.refresh_token = g_http->arg("rtok").c_str();
 
   // Checkboxes: only checked ones are submitted at all.
   uint32_t mask = 0;
   for (int i = 0; i < 8; ++i) {
     char key[3] = {'v', static_cast<char>('0' + i), '\0'};
-    if (g_http.hasArg(key)) mask |= 1u << i;
+    if (g_http->hasArg(key)) mask |= 1u << i;
   }
   next.views_mask = mask ? mask : 0x80;  // nothing ticked -> classic only
 
@@ -144,7 +149,7 @@ void handleSave() {
   }
 
   DeviceConfig::save(next);
-  g_http.send(200, "text/html", PAGE_SAVED);
+  g_http->send(200, "text/html", PAGE_SAVED);
   delay(1200);
   ESP.restart();
 }
@@ -153,6 +158,8 @@ void handleSave() {
 
 void runSetupPortal(const DeviceConfig &current) {
   g_current = current;
+  g_dns = new DNSServer();
+  g_http = new WebServer(80);
 
   // Scan first: the results seed the form's network picker. AP_STA so the
   // scan works while the AP comes up.
@@ -166,19 +173,19 @@ void runSetupPortal(const DeviceConfig &current) {
   WiFi.softAP(AP_NAME);  // open on purpose: a 2-minute setup window
   delay(100);
 
-  g_dns.start(53, "*", WiFi.softAPIP());
+  g_dns->start(53, "*", WiFi.softAPIP());
 
-  g_http.on("/", sendForm);
-  g_http.on("/save", HTTP_POST, handleSave);
-  g_http.onNotFound(sendRedirect);  // captive-portal detection endpoints
-  g_http.begin();
+  g_http->on("/", sendForm);
+  g_http->on("/save", HTTP_POST, handleSave);
+  g_http->onNotFound(sendRedirect);  // captive-portal detection endpoints
+  g_http->begin();
 
   Serial.printf("portal    : AP '%s', %s\n", AP_NAME, PORTAL_URL);
   setupscreen::draw(AP_NAME, "192.168.4.1");
 
   for (;;) {
-    g_dns.processNextRequest();
-    g_http.handleClient();
+    g_dns->processNextRequest();
+    g_http->handleClient();
     delay(2);
   }
 }

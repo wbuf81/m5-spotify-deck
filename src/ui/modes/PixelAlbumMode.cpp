@@ -44,6 +44,13 @@ uint16_t posterize(uint16_t c, int cx, int cy) {
 }
 }  // namespace
 
+void PixelAlbumMode::release() {
+  if (!shimmer_strip_) return;
+  shimmer_strip_->deleteSprite();
+  delete shimmer_strip_;
+  shimmer_strip_ = nullptr;
+}
+
 void PixelAlbumMode::enter(const AppState &st, const ViewCtx &ctx) {
   M5.Display.fillScreen(theme::pal.bg);
 
@@ -141,9 +148,16 @@ void PixelAlbumMode::tick(const AppState &st, const ViewCtx &, uint32_t now_ms) 
   if (band_row == band_last_row_) return;
 
   // Repaint the rows the band is leaving and the rows it now brightens.
-  M5Canvas strip(&M5.Display);
-  strip.setColorDepth(16);
-  const bool strips = strip.createSprite(COLS * CELL, CELL);
+  if (!shimmer_strip_) {
+    shimmer_strip_ = new M5Canvas(&M5.Display);
+    shimmer_strip_->setColorDepth(16);
+    if (!shimmer_strip_->createSprite(COLS * CELL, CELL)) {
+      delete shimmer_strip_;
+      shimmer_strip_ = nullptr;
+    }
+  }
+  M5Canvas *stripp = shimmer_strip_;
+  const bool strips = stripp != nullptr;
   M5.Display.startWrite();
   for (int y = band_last_row_ - 3; y <= band_row + 3; ++y) {
     if (y < 0 || y >= ROWS) continue;
@@ -154,14 +168,13 @@ void PixelAlbumMode::tick(const AppState &st, const ViewCtx &, uint32_t now_ms) 
       uint16_t c = cells_[y * COLS + x];
       if (lift > 0.0f) c = anim::lerp565(c, 0xFFFF, lift);
       if (strips) {
-        strip.fillRect(x * CELL, 0, CELL, CELL, c);
+        stripp->fillRect(x * CELL, 0, CELL, CELL, c);
       } else {
         M5.Display.fillRect(x * CELL, y * CELL, CELL, CELL, c);
       }
     }
-    if (strips) strip.pushSprite(0, y * CELL);
+    if (strips) stripp->pushSprite(0, y * CELL);
   }
   M5.Display.endWrite();
-  if (strips) strip.deleteSprite();
   band_last_row_ = band_row;
 }
