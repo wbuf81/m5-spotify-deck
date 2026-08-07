@@ -2,12 +2,14 @@
 #include "../../core/Hash.h"
 
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
 #include "../../art/ArtRenderer.h"
 #include "../TextWrap.h"
 #include "../Theme.h"
+#include "../../core/Hash.h"
 
 namespace {
 
@@ -74,6 +76,44 @@ void hudValue(int x, const char *val) {
   M5.Display.setTextColor(theme::pal.dim, theme::pal.bg);
   M5.Display.setCursor(x, HUD_Y + 14);
   M5.Display.print(val);
+}
+
+// Attract-mode Tetris geometry. Two lanes per side, clear of everything:
+// HUD ends ~y36, the level spans x96..224, the title band starts y176.
+constexpr int TET_TOP = 42;
+constexpr int TET_BOTTOM = 170;
+constexpr int TET_CELL = 7;
+constexpr int TET_LANES[4] = {10, 52, 240, 282};  // lane x, two per side
+
+// The seven tetrominoes as 4x2 cell masks (row-major, bit 3 = leftmost).
+constexpr uint8_t TET_SHAPES[7][2] = {
+    {0b1111, 0b0000},  // I
+    {0b0110, 0b0110},  // O
+    {0b1110, 0b0100},  // T
+    {0b0110, 0b1100},  // S
+    {0b1100, 0b0110},  // Z
+    {0b1110, 0b1000},  // J
+    {0b1110, 0b0010},  // L
+};
+// Tier-2 NES palette entries, one per shape, like the cartridge would.
+constexpr uint32_t TET_COLORS[7] = {0x48CDDE, 0xEA9E22, 0xA01ACC, 0x0C9300,
+                                    0xB53120, 0x155FD9, 0x994E00};
+
+// The classic block: filled cell, dark outline, light glint pixel.
+void drawTetCell(int x, int y, uint32_t rgb) {
+  M5.Display.fillRect(x, y, TET_CELL, TET_CELL, col(rgb));
+  M5.Display.drawRect(x, y, TET_CELL, TET_CELL, col(0x0F0F0F));
+  M5.Display.fillRect(x + 1, y + 1, 2, 2, col(0xFFFEFF));
+}
+
+void drawTetPiece(int shape, int x, int y, uint32_t rgb) {
+  for (int r = 0; r < 2; ++r) {
+    for (int c = 0; c < 4; ++c) {
+      if (TET_SHAPES[shape][r] & (1 << (3 - c))) {
+        drawTetCell(x + c * TET_CELL, y + r * TET_CELL, rgb);
+      }
+    }
+  }
 }
 
 // A chunky 8px coin: gold circle, darker rim, slot.
@@ -162,10 +202,50 @@ void NesMode::enter(const AppState &st, const ViewCtx &ctx) {
   last_play_ = -1;
   last_liked_ = -2;
   last_coins_ = -1;
+
+  seed_ = fnv1a(st.pb.track_id);
+  last_ms_ = 0;
+  for (int i = 0; i < PIECES; ++i) piece_last_y_[i] = -10000;
 }
 
-void NesMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t) {
+void NesMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) {
   using namespace theme;
+
+  // Tetris rain. The clock only advances while playing, so pause freezes the
+  // pieces mid-fall along with everything else on the device.
+  const float dt =
+      last_ms_ == 0 ? 0.016f : (now_ms - last_ms_ < 100 ? (now_ms - last_ms_) / 1000.0f : 0.1f);
+  last_ms_ = now_ms;
+  if (st.pb.is_playing) clock_ += dt;
+  {
+    constexpr int RANGE = TET_BOTTOM - TET_TOP;
+    constexpr int PIECE_H = TET_CELL * 2;
+    for (int i = 0; i < PIECES; ++i) {
+      const uint32_t h = seed_ ^ (0x9e3779b9u * (i + 1));
+      const int lane = TET_LANES[(h >> 4) % 4];
+      const int shape = (h >> 8) % 7;
+      const float speed = 14.0f + ((h >> 12) % 20);          // px/s
+      const float phase = static_cast<float>((h >> 16) % RANGE);
+      const int span = RANGE + PIECE_H;
+      int y = TET_TOP - PIECE_H +
+              static_cast<int>(std::fmod(clock_ * speed + phase,
+                                         static_cast<float>(span)));
+      if (y == piece_last_y_[i]) continue;
+      // Erase the previous position; lanes never overlap anything else, so a
+      // plain background fill is safe.
+      if (piece_last_y_[i] > -10000) {
+        M5.Display.fillRect(lane, piece_last_y_[i], TET_CELL * 4, PIECE_H,
+                            pal.bg);
+      }
+      // Clip to the band by drawing only rows fully inside it.
+      if (y >= TET_TOP - PIECE_H && y <= TET_BOTTOM) {
+        M5.Display.setClipRect(lane, TET_TOP, TET_CELL * 4, RANGE);
+        drawTetPiece(shape, lane, y, TET_COLORS[shape]);
+        M5.Display.clearClipRect();
+      }
+      piece_last_y_[i] = y;
+    }
+  }
 
   // TIME counts down in whole seconds, like a level timer.
   const int remain =

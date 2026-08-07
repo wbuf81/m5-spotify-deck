@@ -16,6 +16,10 @@
 //
 // Liked = a 1UP heart, volume = a coin counter, and pausing drops the classic
 // centred "- PAUSED -" over the level.
+//
+// The margins either side of the level run attract-mode Tetris: tetrominoes
+// falling in their own lanes, frozen while paused. They never enter the HUD,
+// the level, or the title band.
 class NesMode : public ViewMode {
  public:
   const char *name() const override { return "nes"; }
@@ -29,4 +33,12 @@ class NesMode : public ViewMode {
   int last_play_ = -1;
   int last_liked_ = -2;
   int last_coins_ = -1;
+
+  // Attract-mode Tetris. Position is pure f(clock), so pausing the clock
+  // freezes every piece; only the previous integer y is stored, for erasing.
+  float clock_ = 0.0f;
+  uint32_t last_ms_ = 0;
+  uint32_t seed_ = 0;
+  static constexpr int PIECES = 6;
+  int piece_last_y_[PIECES] = {};
 };

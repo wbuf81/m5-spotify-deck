@@ -24,10 +24,10 @@ BIN = os.path.join(ROOT, ".pio", "build", "native", "program")
 
 # Regions, matching src/ui/Theme.h
 ART = (8, 8, 176, 176)
-# Heart lives in the shared StatusStrip now, between elapsed and the glyph.
-HEART = (96, 204, 24, 24)
-# Speaker + volume figure in the strip.
-VOLUME = (196, 206, 60, 18)
+# Heart lives in the shared StatusStrip, right of the centre glyph.
+HEART = (191, 204, 24, 24)
+# Speaker + volume figure, alone on the strip's left half.
+VOLUME = (74, 206, 60, 18)
 # Progress bar row in the strip.
 BARROW = (8, 200, 304, 3)
 ROW = (0, 206, 320, 34)
@@ -39,7 +39,7 @@ TEXT_TOP = (192, 8, 120, 26)
 # Beacon sprite on the status screen: 96x96, centred, pushed at y=18.
 BEACON = (112, 18, 96, 96)
 # Battery glyph in the StatusStrip, between the play glyph and the volume.
-BATTERY = (174, 212, 22, 14)
+BATTERY = (234, 212, 22, 14)
 
 
 def read_bmp(path):

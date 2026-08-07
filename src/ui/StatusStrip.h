@@ -54,13 +54,14 @@ class StatusStrip {
   char last_track_[ID_LEN] = {};
 };
 
-// Where the strip's heart sits, shared with the tests. The 24px sprite is
-// centred between the elapsed time and the glyph.
-constexpr int STRIP_HEART_X = 96;
+// Strip layout, shared with the tests. The glyph anchors dead centre; volume
+// sits alone on the left half and heart + battery on the right, because the
+// volume group (~44px) visually weighs the same as those two together (~41px).
+// The first arrangement crammed battery and volume against the right edge and
+// left a hole between the elapsed time and the glyph.
+//
+//   0:42     vol      >      heart   batt     -3:18
+constexpr int STRIP_VOL_X = 78;
+constexpr int STRIP_HEART_X = 191;
 constexpr int STRIP_HEART_Y = 204;
-
-// The battery glyph, between the play glyph and the volume. It replaced a
-// floating top-right badge that every single view had to lay out around —
-// the classic title stepped down for it, the NES HUD moved its TIME column,
-// the Game Boy cart clipped it mid-drop. One bar owns all status now.
-constexpr int STRIP_BATT_X = 176;
+constexpr int STRIP_BATT_X = 237;

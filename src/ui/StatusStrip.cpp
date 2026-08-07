@@ -14,7 +14,7 @@
 // blits.
 
 namespace {
-constexpr int VOL_X = 202;
+constexpr int VOL_X = STRIP_VOL_X;
 }
 
 void StatusStrip::release() {
