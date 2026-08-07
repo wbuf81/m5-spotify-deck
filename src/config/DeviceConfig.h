@@ -20,6 +20,11 @@ struct DeviceConfig {
   std::string client_secret;
   std::string refresh_token;
 
+  // Which views rotate: bit i enables full-screen mode i, bit 7 enables the
+  // classic view. Set from the portal's checkboxes. All-on by default; an
+  // empty mask falls back to classic-only rather than a blank device.
+  uint32_t views_mask = 0xFF;
+
   bool complete() const {
     return !wifi_ssid.empty() && !client_id.empty() &&
            !client_secret.empty() && !refresh_token.empty();

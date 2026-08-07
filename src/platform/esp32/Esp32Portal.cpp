@@ -36,6 +36,10 @@ const char PAGE_HEAD[] =
     "credentials. Blank secret fields keep their stored values.</p>"
     "<form method='POST' action='/save'>";
 
+// One checkbox per view; names must match ViewManager's registration order.
+const char *VIEW_NAMES[8] = {"pixel",     "gameboy", "cyberdeck", "synthwave",
+                             "daisy",     "snes",    "nes",       "classic"};
+
 const char PAGE_TAIL[] =
     "<label>Spotify Client ID</label>"
     "<input name='cid' value='%CID%' autocapitalize='off' autocorrect='off'>"
@@ -43,6 +47,7 @@ const char PAGE_TAIL[] =
     "<input name='csec' autocapitalize='off' autocorrect='off'>"
     "<label>Spotify Refresh Token (blank = keep)</label>"
     "<input name='rtok' autocapitalize='off' autocorrect='off'>"
+    "%VIEWS%"
     "<button type='submit'>Save &amp; Reboot</button></form>"
     "<p>Get a refresh token with tools/get_refresh_token.py from the repo, "
     "then paste it here.</p></body></html>";
@@ -88,6 +93,23 @@ void sendForm() {
   std::string tail = PAGE_TAIL;
   const size_t at = tail.find("%CID%");
   tail.replace(at, 5, htmlEscape(g_current.client_id));
+  // View toggles, checked from the stored mask (bit 7 = classic).
+  std::string views =
+      "<label>Views in the rotation</label><div style='display:grid;"
+      "grid-template-columns:1fr 1fr;gap:6px;margin-top:6px'>";
+  for (int i = 0; i < 8; ++i) {
+    const uint32_t bit = 1u << i;
+    views += "<span><input type='checkbox' name='v";
+    views += static_cast<char>('0' + i);
+    views += "' ";
+    if (g_current.views_mask & bit) views += "checked";
+    views += "> ";
+    views += VIEW_NAMES[i];
+    views += "</span>";
+  }
+  views += "</div>";
+  const size_t vat = tail.find("%VIEWS%");
+  tail.replace(vat, 7, views);
   page += tail;
   g_http.send(200, "text/html", page.c_str());
 }
@@ -106,6 +128,14 @@ void handleSave() {
   next.client_id = g_http.arg("cid").c_str();
   next.client_secret = g_http.arg("csec").c_str();
   next.refresh_token = g_http.arg("rtok").c_str();
+
+  // Checkboxes: only checked ones are submitted at all.
+  uint32_t mask = 0;
+  for (int i = 0; i < 8; ++i) {
+    char key[3] = {'v', static_cast<char>('0' + i), '\0'};
+    if (g_http.hasArg(key)) mask |= 1u << i;
+  }
+  next.views_mask = mask ? mask : 0x80;  // nothing ticked -> classic only
 
   // Blank password with an unchanged SSID means "keep the stored password";
   // blank with a NEW ssid genuinely means an open network.

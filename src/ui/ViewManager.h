@@ -36,6 +36,13 @@ class ViewManager {
   // back to rotating. Returns the new name for the on-screen confirmation.
   const char *cycleMode();
 
+  // Bit i enables modes_[i]; bit 7 enables classic. From the portal's
+  // checkboxes via NVS. An empty mask degrades to classic-only — a device
+  // must always have something to show. An explicit pin (button combo or
+  // EMU_MODE) may still land on a disabled view; disabling controls the
+  // rotation, not the operator.
+  void setEnabledMask(uint32_t mask) { enabled_mask_ = mask; }
+
   int pinned() const { return pinned_; }
   int current() const { return current_; }
   void render(const AppState &st, uint32_t now_ms);
@@ -61,6 +68,7 @@ class ViewManager {
   ViewMode *modes_[MODE_COUNT - 1] = {};
   int current_ = -1;  // -1 == classic
   int pinned_ = -2;   // -2 == rotate
+  uint32_t enabled_mask_ = 0xFF;
   bool force_ = true;
   bool entered_ = false;
 

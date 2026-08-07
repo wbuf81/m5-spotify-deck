@@ -581,6 +581,20 @@ def setup_portal_screen_renders(tmp):
     assert count(px, (0, 0, 200, 36), is_green) > 40, "SETUP MODE headline missing"
 
 
+@case
+def disabled_views_stay_out_of_the_rotation(tmp):
+    """EMU_VIEWS mirrors the portal's view toggles. With only the Game Boy
+    enabled (bit 1), every track must land on the DMG screen — which is easy
+    to assert because that view is four shades of green by contract."""
+    for track in ("0", "1", "3"):
+        px = run({"EMU_VIEWS": "0x02", "EMU_TRACK": track,
+                  "EMU_EXIT_MS": "2400"}, tmp(f"mask_{track}"), unpin_mode=True)
+        screen = region(px, (0, 0, 320, 190))
+        offenders = sum(1 for (r, g, b) in screen if r > g + 12 or b > g + 12)
+        assert offenders < 50, \
+            f"track {track}: rotation left the enabled set ({offenders} non-green px)"
+
+
 def main():
     if not os.path.exists(BIN):
         sys.exit(f"build first: pio run -e native   (missing {BIN})")

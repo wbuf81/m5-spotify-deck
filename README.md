@@ -41,7 +41,11 @@ regenerates them.)*
   through every view.
 - **A setup portal**: hold the left button at power-on (or boot unconfigured)
   and the device opens a WiFi access point with a phone-friendly form for
-  WiFi + Spotify credentials. No recompiling to move it to a new network.
+  WiFi + Spotify credentials — and checkboxes to choose which views rotate.
+  No recompiling to move it to a new network or tune it to its owner.
+- **Extensible**: views implement a small `enter`/`tick` interface —
+  [docs/ADDING_A_VIEW.md](docs/ADDING_A_VIEW.md) is the contract and
+  checklist for writing your own.
 
 ![setup portal](docs/screenshots/setup-portal.png)
 
@@ -182,6 +186,7 @@ built on:
 | `EMU_TOAST=<text>` | Raise a toast at startup |
 | `EMU_FIRE=<like\|unlike\|playpause>` + `EMU_FIRE_MS` | Fire a user action at a known time |
 | `EMU_BATTERY=<pct>` | Override the battery reading |
+| `EMU_VIEWS=<mask>` | Enable only some views, as the portal's checkboxes would (bit 7 = classic) |
 | `EMU_ARTLOADING=1` | Render every cover as still-downloading |
 | `EMU_PORTAL=1` | Preview the setup-portal screen |
 | `EMU_DIM_AFTER_MS` / `EMU_SLEEP_AFTER_MS` | Shorten the dim/sleep timers |

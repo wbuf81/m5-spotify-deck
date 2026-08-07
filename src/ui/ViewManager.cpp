@@ -40,6 +40,17 @@ void ViewManager::selectFor(const char *track_id) {
 
   const uint32_t h = fnv1a(track_id);
 
+  // The enabled set, as view indices (-1 == classic). Empty -> classic only.
+  int enabled[MODE_COUNT];
+  int n_enabled = 0;
+  if (enabled_mask_ & 0x80) enabled[n_enabled++] = -1;
+  for (int i = 0; i < MODE_COUNT - 1; ++i) {
+    if (enabled_mask_ & (1u << i)) enabled[n_enabled++] = i;
+  }
+  if (n_enabled == 0) {
+    enabled[n_enabled++] = -1;
+  }
+
 #if defined(FORCE_VIEW)
   // Compile-time pin, for testing a single view on hardware where there is no
   // environment to read EMU_MODE from. -1 is classic, 0..3 the full-screen
@@ -63,21 +74,27 @@ void ViewManager::selectFor(const char *track_id) {
   }
 #endif
 
-  // -1 is classic, 0..3 the full-screen modes.
-  int pick = static_cast<int>(h % MODE_COUNT) - 1;
-  if (pick == current_) pick = (pick + 2 > MODE_COUNT - 2) ? -1 : pick + 1;
-  current_ = pick;
+  // Pick among the ENABLED views only, still deterministic per track, still
+  // never the same view twice running (when more than one is enabled).
+  int slot = static_cast<int>(h % n_enabled);
+  if (enabled[slot] == current_ && n_enabled > 1) slot = (slot + 1) % n_enabled;
+  current_ = enabled[slot];
   NETLOG("view: %s", currentName());
 }
 
 const char *ViewManager::cycleMode() {
-  // -2 rotate -> -1 classic -> 0..3 -> back to -2.
+  // -2 rotate -> -1 classic -> enabled modes in order -> back to -2. The
+  // button combo walks only what the owner left switched on.
+  auto next_enabled = [&](int from) -> int {
+    for (int i = from + 1; i < MODE_COUNT - 1; ++i) {
+      if (enabled_mask_ & (1u << i)) return i;
+    }
+    return -2;  // wrapped past the end
+  };
   if (pinned_ == -2) {
-    pinned_ = -1;
-  } else if (pinned_ >= MODE_COUNT - 2) {
-    pinned_ = -2;
+    pinned_ = (enabled_mask_ & 0x80) ? -1 : next_enabled(-1);
   } else {
-    pinned_ += 1;
+    pinned_ = next_enabled(pinned_ == -1 ? -1 : pinned_);
   }
 
   if (pinned_ != -2) current_ = pinned_;

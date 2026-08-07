@@ -37,6 +37,7 @@ DeviceConfig DeviceConfig::load() {
     c.client_id = getOr(p, "cid", cid);
     c.client_secret = getOr(p, "csec", csec);
     c.refresh_token = getOr(p, "rtok", rtok);
+    c.views_mask = p.getUInt("views", 0xFF);
     p.end();
   } else {
     // First boot: the namespace does not exist yet.
@@ -62,6 +63,7 @@ bool DeviceConfig::save(const DeviceConfig &c) {
     ok &= p.putString("csec", c.client_secret.c_str()) > 0;
   if (!c.refresh_token.empty())
     ok &= p.putString("rtok", c.refresh_token.c_str()) > 0;
+  p.putUInt("views", c.views_mask);
   p.end();
   return ok;
 }

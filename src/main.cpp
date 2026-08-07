@@ -402,6 +402,16 @@ void setup(void) {
   }
 #endif
 
+#if defined(CAN_GO_LIVE)
+  g_screen.setEnabledMask(device_cfg.views_mask);
+#endif
+#if defined(EMULATOR)
+  // EMU_VIEWS=<mask> mirrors the portal's view toggles for tests.
+  if (const char *v = std::getenv("EMU_VIEWS")) {
+    g_screen.setEnabledMask(static_cast<uint32_t>(std::strtoul(v, nullptr, 0)));
+  }
+#endif
+
   if (!g_live) {
     g_fake.begin(&g_state, now);
 #if defined(EMULATOR)
