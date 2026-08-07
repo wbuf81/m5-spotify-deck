@@ -1,12 +1,16 @@
 #pragma once
 #include "ViewMode.h"
 
-// The handheld on the left; the song on the right as a game cartridge.
+// The whole view IS the DMG screen.
 //
-// Each track IS a cart: the album art is its label sticker. On a track change
-// the cart drops in from the top, the LCD runs the DMG boot ritual — pale
-// screen, dark logo-bar sliding down, blink — and only then does the cover
-// appear on the little screen. The playlist reads as a shoebox of carts.
+// The first two versions drew the handheld as an object — a portrait of a
+// Game Boy with a small cover inside its LCD, later with a cartridge ritual.
+// Squeezing the shell above the shared strip squished it, and the cover was
+// tiny. This inverts the idea: the full panel renders as the Game Boy's LCD,
+// everything in the four DMG greens — the cover big and ordered-dithered the
+// way real GB games faked shades, the track info in a Pokemon-style
+// double-border dialog box, and the boot logo-drop playing full screen on
+// every track change.
 class GameBoyMode : public ViewMode {
  public:
   const char *name() const override { return "gameboy"; }
@@ -14,8 +18,9 @@ class GameBoyMode : public ViewMode {
   void tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) override;
 
  private:
-  uint32_t start_ms_ = 0;  // 0 = animation not started yet
-  int phase_ = 0;          // 0 slide-in, 1 boot, 2 settled
-  int last_cart_y_ = 0;
-  int last_bar_y_ = 0;
+  void drawMain(const AppState &st, const ViewCtx &ctx);
+
+  uint32_t start_ms_ = 0;  // 0 = boot not started
+  int phase_ = 0;          // 0 boot bar, 1 settled
+  int last_bar_y_ = -1;
 };

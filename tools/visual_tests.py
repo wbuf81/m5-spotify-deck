@@ -414,30 +414,29 @@ def view_mode_rotates_between_tracks(tmp):
 
 
 @case
-def gameboy_mode_draws_the_handheld_in_colour(tmp):
-    """The mode is now the device itself with a colourised cover in its LCD.
+def gameboy_mode_is_four_shades_of_green(tmp):
+    """The whole view above the strip renders as the DMG LCD.
 
-    It used to be four DMG greens over the whole screen, and this test asserted
-    exactly that — so it correctly failed when the design changed. Rewritten
-    against what the mode is for: a recognisable body, and album colour inside
-    the screen rather than a green wash.
+    This test has tracked the mode through three designs: a green wash, then
+    a drawn handheld with a colour cover (which asserted body plastic and LCD
+    colour), and now the full-screen LCD — so it asserts the filter: every
+    pixel above the strip is green-dominant, and the dithered cover has real
+    tonal range.
     """
-    px = run({"EMU_MODE": "2", "EMU_EXIT_MS": "2000"}, tmp("gb"))
+    px = run({"EMU_MODE": "2", "EMU_EXIT_MS": "2400"}, tmp("gb"))
 
-    # The plastic body: a large flat region of one light, desaturated colour.
-    body = region(px, (20, 150, 100, 40))
-    from collections import Counter
-    dominant, count = Counter(body).most_common(1)[0]
-    r, g, b = dominant
-    assert count > len(body) * 0.5, "no solid body colour where the shell should be"
-    assert min(r, g, b) > 100, f"body is too dark to read as plastic: {dominant}"
-    assert max(r, g, b) - min(r, g, b) < 60, f"body is too saturated: {dominant}"
+    # The green filter: nothing above the strip may be red- or blue-dominant.
+    screen = region(px, (0, 0, 320, 190))
+    offenders = sum(1 for (r, g, b) in screen if r > g + 12 or b > g + 12)
+    assert offenders < 50, f"{offenders} non-green pixels on the DMG screen"
 
-    # The LCD must carry the album's colour, not a monochrome wash.
-    lcd = region(px, (30, 30, 100, 84))
-    assert len(set(lcd)) > 20, "LCD looks flat; artwork did not render"
-    coloured = sum(1 for (r, g, b) in lcd if max(r, g, b) - min(r, g, b) > 40)
-    assert coloured > 200, f"LCD is monochrome ({coloured} saturated pixels)"
+    # The dither carries the artwork: the art region must span the shade range.
+    art = region(px, (8, 8, 176, 176))
+    assert len(set(art)) >= 3, "cover flat; dither did not render"
+    dark = sum(1 for (r, g, b) in art if g < 90)
+    light = sum(1 for (r, g, b) in art if g > 150)
+    assert dark > 500 and light > 500, \
+        f"dither lacks tonal range (dark={dark}, light={light})"
 
 
 @case
