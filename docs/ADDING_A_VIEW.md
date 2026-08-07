@@ -44,6 +44,12 @@ class MyMode : public ViewMode {
    for free, which is the house style.
 7. **Respect `theme::dimFactor()`** in your colours so the view dims with the
    screen.
+8. **Never allocate sprites per frame.** A create/delete cycle in `tick()` —
+   even a 640-byte one — interleaves with the net task's TLS buffers and
+   shreds the heap into fragments; after enough uptime the largest free block
+   drops below what the JPEG decoder needs and every view says "no artwork".
+   Make working sprites members: create lazily, free in `release()`. One-shot
+   sprites inside `enter()` are fine — it runs once per track, not per frame.
 
 ## Registration checklist
 
