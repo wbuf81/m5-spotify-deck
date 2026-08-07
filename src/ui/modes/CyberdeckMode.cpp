@@ -3,6 +3,7 @@
 #include <M5Unified.h>
 
 #include <cstdio>
+#include <cstring>
 
 #include "../../art/ArtRenderer.h"
 #include "../Crt.h"
@@ -20,6 +21,10 @@ constexpr uint32_t P_DIM = 0x1A5610;
 constexpr uint32_t P_FAINT = 0x0C2A08;
 
 constexpr int LEFT = 12;
+
+// The event log region, between the LNK row and the strip's divider.
+constexpr int LOG_Y = 146;
+constexpr int LOG_LINE_H = 13;
 
 // Art panel: 24x24 cells of 3px inside a bracketed frame. The first version
 // was 16 cells of 4px with a hard three-level threshold, which read as static
@@ -150,8 +155,89 @@ void CyberdeckMode::enter(const AppState &st, const ViewCtx &ctx) {
 
   // Divider above the shared strip, echoing the header rule.
   M5.Display.drawFastHLine(0, theme::STRIP_Y - 4, 320, dim);
+
+  // The log survives across enters (a terminal's scrollback would), but the
+  // panel repaint means it must draw again, and this track's load is news.
+  char line[28];
+  std::snprintf(line, sizeof(line), "> LOAD %.16s", st.pb.title);
+  pushLog(line);
+  std::snprintf(last_track_, sizeof(last_track_), "%s", st.pb.track_id);
+  last_play_ = st.pb.is_playing ? 1 : 0;
+  last_vol_ = st.pb.volume_pct;
+  last_liked_ = st.pb.liked_known ? (st.pb.liked ? 1 : 0) : -1;
+  drawLog();
 }
 
-void CyberdeckMode::tick(const AppState &, const ViewCtx &, uint32_t) {
-  // Transport, heart, volume and timecodes all live in the shared StatusStrip.
+void CyberdeckMode::pushLog(const char *line) {
+  std::memmove(log_[0], log_[1], sizeof(log_[0]) * 2);
+  std::snprintf(log_[2], sizeof(log_[2]), "%s", line);
+  log_dirty_ = true;
+}
+
+void CyberdeckMode::drawLog() {
+  const uint16_t mid = phos(P_MID);
+  const uint16_t dim = phos(P_DIM);
+  const uint16_t faint = phos(P_FAINT);
+
+  // Clear the region, restore its scanlines, then the three lines. The newest
+  // line is brightest, like phosphor persistence in reverse.
+  M5.Display.fillRect(0, LOG_Y, 320, LOG_LINE_H * 3 + 4, TFT_BLACK);
+  for (int y = LOG_Y; y < LOG_Y + LOG_LINE_H * 3 + 4; y += 3) {
+    M5.Display.drawFastHLine(0, y, 320, faint);
+  }
+  M5.Display.setFont(theme::fontSmall());
+  for (int i = 0; i < 3; ++i) {
+    M5.Display.setTextColor(i == 2 ? mid : dim);
+    M5.Display.setCursor(LEFT, LOG_Y + i * LOG_LINE_H);
+    M5.Display.print(log_[i]);
+  }
+  log_dirty_ = false;
+}
+
+void CyberdeckMode::tick(const AppState &st, const ViewCtx &, uint32_t now_ms) {
+  // Transport lives in the strip; this feeds the terminal's event log from
+  // real state changes, because a terminal that never prints is a poster.
+  char line[28];
+
+  const int play_now = st.pb.is_playing ? 1 : 0;
+  if (play_now != last_play_) {
+    last_play_ = play_now;
+    pushLog(play_now ? "> EXEC play" : "> HALT pause");
+  }
+  if (st.pb.volume_pct != last_vol_) {
+    last_vol_ = st.pb.volume_pct;
+    if (st.pb.volume_pct >= 0) {
+      std::snprintf(line, sizeof(line), "> VOL %d", st.pb.volume_pct);
+      pushLog(line);
+    }
+  }
+  const int liked_now = st.pb.liked_known ? (st.pb.liked ? 1 : 0) : -1;
+  if (liked_now != last_liked_) {
+    if (last_liked_ != -2 && liked_now >= 0) {
+      pushLog(liked_now ? "> SAV lib +track" : "> DEL lib -track");
+    }
+    last_liked_ = liked_now;
+    // The SAV readout row must agree with the log it just printed.
+    M5.Display.fillRect(LEFT + 40, 114, 80, 12, TFT_BLACK);
+    label(114, "", liked_now == 1 ? "YES" : (liked_now == 0 ? "NO" : "?"),
+          phos(P_DIM), phos(P_MID));
+  }
+  // Idle heartbeat, so the log never looks dead for long.
+  if (now_ms - last_scan_ms_ > 9000) {
+    last_scan_ms_ = now_ms;
+    std::snprintf(line, sizeof(line), "> SCAN link.. %s",
+                  st.link == LinkStatus::Online ? "ok" : "??");
+    pushLog(line);
+  }
+  if (log_dirty_) drawLog();
+
+  // The block cursor, blinking after the newest line.
+  const bool cur = ((now_ms / 500) % 2) == 0;
+  if (cur != cursor_on_) {
+    cursor_on_ = cur;
+    M5.Display.setFont(theme::fontSmall());
+    const int w = M5.Display.textWidth(log_[2]);
+    M5.Display.fillRect(LEFT + w + 4, LOG_Y + 2 * LOG_LINE_H, 7, 11,
+                        cur ? phos(P_MID) : TFT_BLACK);
+  }
 }

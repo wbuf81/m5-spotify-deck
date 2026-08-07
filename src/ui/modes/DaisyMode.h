@@ -21,4 +21,15 @@ class DaisyMode : public ViewMode {
   bool last_liked_ = false;
   bool last_liked_known_ = false;
   uint32_t seed_ = 0;
+
+  // Going-to-sleep: pausing runs drowsy -> one yawn -> sleep instead of
+  // cutting straight to snoring. 0 = not pausing.
+  uint32_t pause_started_ms_ = 0;
+
+  // The ball. Every so often it bounces across the floor and she goes alert
+  // watching it. Purely clock-driven; frozen by pause like everything else.
+  float clock_ = 0.0f;
+  uint32_t last_ms_ = 0;
+  int ball_last_x_ = -1000;
+  int ball_last_y_ = 0;
 };

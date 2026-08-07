@@ -60,21 +60,19 @@ void DaisyMode::enter(const AppState &st, const ViewCtx &ctx) {
                         theme::pal.bar_bg);
   }
 
-  M5.Display.setFont(theme::fontTitle());
-  M5.Display.setTextColor(theme::pal.text, theme::pal.bg);
-  char lines[2][WRAP_MAX_LINE];
-  const int n = wrapText(st.pb.title, 200, lines, 2);
-  int y = 12;
-  for (int i = 0; i < n; ++i) {
-    M5.Display.setCursor(10, y);
-    M5.Display.print(lines[i]);
-    y += M5.Display.fontHeight();
-  }
-  y += 4;
+  // One line each: her sprite box now reaches y=63 (the floor moved up when
+  // the shared strip arrived), and a two-line title put the artist inside it —
+  // the box's background fill was erasing half of "Radiohead".
   M5.Display.setFont(theme::fontArtist());
+  M5.Display.setTextColor(theme::pal.text, theme::pal.bg);
+  char lines[1][WRAP_MAX_LINE];
+  wrapText(st.pb.title, 200, lines, 1);
+  M5.Display.setCursor(10, 10);
+  M5.Display.print(lines[0]);
+  M5.Display.setFont(theme::fontSmall());
   M5.Display.setTextColor(theme::pal.dim, theme::pal.bg);
   wrapText(st.pb.artist, 200, lines, 1);
-  M5.Display.setCursor(10, y);
+  M5.Display.setCursor(10, 28);
   M5.Display.print(lines[0]);
 
   // The floor she stands on, with a few tufts so it reads as ground.
@@ -99,11 +97,57 @@ void DaisyMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) {
   last_liked_ = st.pb.liked;
   last_liked_known_ = st.pb.liked_known;
 
+  const float dt =
+      last_ms_ == 0 ? 0.016f : std::fmin(0.1f, (now_ms - last_ms_) / 1000.0f);
+  last_ms_ = now_ms;
+  if (st.pb.is_playing) clock_ += dt;
+
+  // The ball: for 2.2 seconds of every 34, it bounces across the floor. Its
+  // whole flight is a function of the clock, so pause freezes it mid-hop.
+  const float cycle = std::fmod(clock_, 34.0f);
+  const bool ball_flying = cycle < 2.2f;
+  if (ball_flying) {
+    const float t = cycle / 2.2f;
+    const int bx = -8 + static_cast<int>(t * 336.0f);
+    // Three decaying hops.
+    const float hop = std::fabs(std::sin(t * 3.0f * 3.14159f));
+    const int by = FLOOR_Y - 5 - static_cast<int>(hop * (44.0f - t * 22.0f));
+    if (bx != ball_last_x_) {
+      if (ball_last_x_ > -999) {
+        M5.Display.fillRect(ball_last_x_ - 5, ball_last_y_ - 5, 11, 11,
+                            theme::pal.bg);
+        // Restore the floor line where the erase crossed it.
+        M5.Display.drawFastHLine(ball_last_x_ - 5, FLOOR_Y, 11,
+                                 anim::lerp565(theme::pal.bg, ctx.tint, 0.6f));
+      }
+      M5.Display.fillCircle(bx, by, 4, M5.Display.color565(0xD8, 0x40, 0x38));
+      M5.Display.fillCircle(bx - 1, by - 1, 1,
+                            M5.Display.color565(0xFF, 0xA0, 0x98));
+      ball_last_x_ = bx;
+      ball_last_y_ = by;
+    }
+  } else if (ball_last_x_ > -999) {
+    M5.Display.fillRect(ball_last_x_ - 5, ball_last_y_ - 5, 11, 11,
+                        theme::pal.bg);
+    M5.Display.drawFastHLine(ball_last_x_ - 5, FLOOR_Y, 11,
+                             anim::lerp565(theme::pal.bg, ctx.tint, 0.6f));
+    ball_last_x_ = -1000;
+  }
+
+  // Falling asleep is a sequence, not a cut: drowsy, one yawn, then sleep.
+  if (!st.pb.is_playing && pause_started_ms_ == 0) pause_started_ms_ = now_ms;
+  if (st.pb.is_playing) pause_started_ms_ = 0;
+
   daisy::DaisyAnim want;
   if (now_ms < wag_until_ms_ && wag_until_ms_ != 0) {
     want = daisy::Daisy_Wag;
   } else if (!st.pb.is_playing) {
-    want = daisy::Daisy_Sleep;  // she still breathes: sleep has frames
+    const uint32_t asleep_t = now_ms - pause_started_ms_;
+    want = asleep_t < 5000   ? daisy::Daisy_Drowsy
+           : asleep_t < 6800 ? daisy::Daisy_Yawn
+                             : daisy::Daisy_Sleep;
+  } else if (ball_flying) {
+    want = daisy::Daisy_Alert;  // she watches the ball go by
   } else {
     want = pickPlayingAnim(st);
   }
@@ -115,5 +159,4 @@ void DaisyMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) {
     anim_ = want;
     frame_ = f;
   }
-
 }

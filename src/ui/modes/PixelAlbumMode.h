@@ -9,4 +9,12 @@ class PixelAlbumMode : public ViewMode {
   void enter(const AppState &st, const ViewCtx &ctx) override;
   void tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) override;
 
+ private:
+  // The posterized cells, kept so the shimmer can redraw rows without another
+  // JPEG decode. 80x40 cells = 6.4KB, static cost, no heap.
+  uint16_t cells_[80 * 40] = {};
+  bool have_cells_ = false;
+  float clock_ = 0.0f;
+  uint32_t last_ms_ = 0;
+  int band_last_row_ = -1000;
 };

@@ -15,5 +15,6 @@ class SynthwaveMode : public ViewMode {
   M5Canvas *sun_ = nullptr;   // pre-rendered disc, re-blitted as it sinks
   float clock_ = 0.0f;
   uint32_t last_ms_ = 0;
+  bool streak_was_active_ = false;
   int last_sun_y_ = -1000;
 };

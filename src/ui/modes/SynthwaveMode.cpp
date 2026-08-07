@@ -55,13 +55,7 @@ void SynthwaveMode::enter(const AppState &st, const ViewCtx &ctx) {
     }
   }
 
-  // Stars above the horizon.
-  for (int i = 0; i < 60; ++i) {
-    const int x = (i * 5779) % 320;
-    const int y = (i * 2411) % (HORIZON - 10);
-    M5.Display.drawPixel(x, y, anim::lerp565(theme::pal.bg, theme::pal.text,
-                                             0.2f + 0.5f * ((i % 5) / 5.0f)));
-  }
+  // Stars are drawn (and twinkled) in tick(); nothing to do here.
 
   // Title in the sky, top-left, clear of the sun's column. The transport used
   // to live under the horizon; that space belongs to the shared strip now.
@@ -86,6 +80,52 @@ void SynthwaveMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms
       last_ms_ == 0 ? 0.016f : std::fmin(0.1f, (now_ms - last_ms_) / 1000.0f);
   last_ms_ = now_ms;
   if (st.pb.is_playing) clock_ += dt;
+
+  // Twinkling stars. Single pixels, redrawn every frame with a per-star sine
+  // phase — sixty pixel writes is nothing, and static stars over a moving
+  // grid read as stickers. Stars keep clear of the title block (y < 42) and
+  // the sun's column so nothing flickers through text or disc.
+  for (int i = 0; i < 60; ++i) {
+    const int x = (i * 5779) % 320;
+    const int y = 42 + (i * 2411) % (HORIZON - 56);
+    const int dx = x - SUN_CX;
+    if (dx > -60 && dx < 60) continue;  // the sun's lane
+    const float tw = 0.5f + 0.5f * std::sin(clock_ * (1.1f + (i % 7) * 0.23f) + i);
+    M5.Display.drawPixel(x, y, anim::lerp565(theme::pal.bg, theme::pal.text,
+                                             0.12f + 0.55f * tw));
+  }
+
+  // A shooting star, roughly twice a minute. Its whole life is a function of
+  // the clock: for half a second of each 26s cycle a bright head streaks
+  // down-right with a fading tail, erased by re-darkening the pixels behind
+  // it. Pausing freezes it mid-streak like everything else.
+  {
+    const float cycle = std::fmod(clock_, 26.0f);
+    const bool active = cycle < 0.55f;
+    if (active || streak_was_active_) {
+      const int n = static_cast<int>((26.0f * 331.0f)) ;  // per-cycle seed churn
+      const uint32_t h = 0x9e3779b9u * (static_cast<uint32_t>(clock_ / 26.0f) + 3) + n;
+      const int x0 = 30 + static_cast<int>(h % 140);
+      const int y0 = 46 + static_cast<int>((h >> 8) % 30);
+      const float t = active ? (cycle / 0.55f) : 1.0f;
+      const int steps = 18;
+      const int head = static_cast<int>(steps * t);
+      for (int k = 0; k <= steps; ++k) {
+        const int px = x0 + k * 6, py = y0 + k * 3;
+        if (px >= 318 || py >= HORIZON - 4) break;
+        const int dx = px - SUN_CX;
+        if (dx > -62 && dx < 62) continue;
+        float b = 0.0f;
+        if (active && k <= head) {
+          const int age = head - k;
+          b = age == 0 ? 0.95f : (age < 5 ? 0.5f - age * 0.1f : 0.0f);
+        }
+        M5.Display.drawPixel(px, py, anim::lerp565(theme::pal.bg, theme::pal.text, b));
+        M5.Display.drawPixel(px + 1, py, anim::lerp565(theme::pal.bg, theme::pal.text, b * 0.6f));
+      }
+      streak_was_active_ = active;
+    }
+  }
 
   const float p = st.pb.duration_ms == 0
                       ? 0.0f

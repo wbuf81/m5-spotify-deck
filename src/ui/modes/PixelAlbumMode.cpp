@@ -1,8 +1,10 @@
 #include "PixelAlbumMode.h"
 
+#include <cmath>
 #include <cstdio>
 
 #include "../../art/ArtRenderer.h"
+#include "../Anim.h"
 #include "../Crt.h"
 #include "../TextWrap.h"
 #include "../Theme.h"
@@ -71,6 +73,7 @@ void PixelAlbumMode::enter(const AppState &st, const ViewCtx &ctx) {
       const int sy = y + ((COLS - ROWS) / 2);
       for (int x = 0; x < COLS; ++x) {
         const uint16_t c = posterize(src.readPixel(x, sy), x, y);
+        cells_[y * COLS + x] = c;  // kept for the shimmer sweep
         if (strips) {
           strip.fillRect(x * CELL, 0, CELL, CELL, c);
         } else {
@@ -82,6 +85,7 @@ void PixelAlbumMode::enter(const AppState &st, const ViewCtx &ctx) {
     M5.Display.endWrite();
     if (strips) strip.deleteSprite();
     src.deleteSprite();
+    have_cells_ = true;
   }
 
   // Text sits on a hard-edged band; drop shadows and gradients would fight the
@@ -113,8 +117,51 @@ void PixelAlbumMode::enter(const AppState &st, const ViewCtx &ctx) {
 
   // No scanlines over the artwork: the 8px cells are already the texture, and
   // the two together read as interference.
+  last_ms_ = 0;
+  band_last_row_ = -1000;
 }
 
-void PixelAlbumMode::tick(const AppState &, const ViewCtx &, uint32_t) {
-  // Transport, heart, volume and timecodes all live in the shared StatusStrip.
+void PixelAlbumMode::tick(const AppState &st, const ViewCtx &, uint32_t now_ms) {
+  // A CRT shimmer: a soft bright band sweeping slowly down the artwork, the
+  // way a filmed monitor shows its refresh. Rows are redrawn from the kept
+  // cell buffer, so the sweep never touches the JPEG decoder. It advances a
+  // cell row at a time and only while playing — a paused screen holds still.
+  if (!have_cells_) return;
+  const float dt =
+      last_ms_ == 0 ? 0.016f : std::fmin(0.1f, (now_ms - last_ms_) / 1000.0f);
+  last_ms_ = now_ms;
+  if (!st.pb.is_playing) return;
+  clock_ += dt;
+
+  // One full sweep every ~7 seconds, then a rest; cycle 18s.
+  constexpr int SWEEP_ROWS = ROWS + 6;
+  const float cycle = std::fmod(clock_, 18.0f);
+  const int band_row =
+      cycle < 7.0f ? static_cast<int>((cycle / 7.0f) * SWEEP_ROWS) - 3 : -1000;
+  if (band_row == band_last_row_) return;
+
+  // Repaint the rows the band is leaving and the rows it now brightens.
+  M5Canvas strip(&M5.Display);
+  strip.setColorDepth(16);
+  const bool strips = strip.createSprite(COLS * CELL, CELL);
+  M5.Display.startWrite();
+  for (int y = band_last_row_ - 3; y <= band_row + 3; ++y) {
+    if (y < 0 || y >= ROWS) continue;
+    const int d = y - band_row;
+    // Brightness falls off around the band centre; outside it, plain cells.
+    const float lift = (d >= -1 && d <= 1) ? (d == 0 ? 0.30f : 0.14f) : 0.0f;
+    for (int x = 0; x < COLS; ++x) {
+      uint16_t c = cells_[y * COLS + x];
+      if (lift > 0.0f) c = anim::lerp565(c, 0xFFFF, lift);
+      if (strips) {
+        strip.fillRect(x * CELL, 0, CELL, CELL, c);
+      } else {
+        M5.Display.fillRect(x * CELL, y * CELL, CELL, CELL, c);
+      }
+    }
+    if (strips) strip.pushSprite(0, y * CELL);
+  }
+  M5.Display.endWrite();
+  if (strips) strip.deleteSprite();
+  band_last_row_ = band_row;
 }
