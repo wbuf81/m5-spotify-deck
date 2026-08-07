@@ -152,7 +152,9 @@ void PlayGlyph::render(bool playing, uint32_t now_ms) {
   if (!cv_) return;
 
   const int ox = SCREEN_W / 2 - (GLYPH_CV_W / 2);
-  const int oy = TIME_Y - 2;
+  // Centred on the strip text's optical centreline (y=221): the digits'
+  // cap-height runs 217..225, and every non-text element aligns to its middle.
+  const int oy = TIME_Y + 2;
 
   cv_->fillSprite(pal.strip);
 

@@ -83,8 +83,8 @@ void StatusStrip::drawVolume(const AppState &st) {
   M5.Display.print(vol);
 
   // Speaker glyph with level arcs, opaque plate behind it so a louder arc from
-  // the previous value never lingers.
-  const int sx = VOL_X, sy = TIME_Y + 3;
+  // the previous value never lingers. sy centres the 10px glyph on y=221.
+  const int sx = VOL_X, sy = TIME_Y + 4;
   M5.Display.fillRect(sx - 1, sy - 2, 14, 13, pal.strip);
   M5.Display.fillRect(sx, sy + 3, 3, 4, pal.dim);
   M5.Display.fillTriangle(sx + 3, sy + 4, sx + 6, sy, sx + 6, sy + 9, pal.dim);
@@ -95,7 +95,7 @@ void StatusStrip::drawVolume(const AppState &st) {
 void StatusStrip::drawBattery(const AppState &st) {
   using namespace theme;
   const int8_t pct = st.battery_pct;
-  const int x = STRIP_BATT_X, y = TIME_Y + 3;
+  const int x = STRIP_BATT_X, y = TIME_Y + 5;  // 9px box centred on y=221
 
   // Plate first, so a previous level never lingers.
   M5.Display.fillRect(x - 1, y - 2, 20, 13, pal.strip);

@@ -63,5 +63,5 @@ class StatusStrip {
 //   0:42     vol      >      heart   batt     -3:18
 constexpr int STRIP_VOL_X = 78;
 constexpr int STRIP_HEART_X = 191;
-constexpr int STRIP_HEART_Y = 204;
+constexpr int STRIP_HEART_Y = 209;  // 24px sprite centred on y=221
 constexpr int STRIP_BATT_X = 237;

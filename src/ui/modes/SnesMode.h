@@ -12,6 +12,10 @@
 // speed follows volume, pausing freezes the plane, and rows fade toward the
 // sky colour with distance because real Mode 7 games did exactly that to hide
 // the horizon shimmer.
+//
+// A racer drives the plane: it weaves and drifts in depth on smooth
+// sine-sum noise, scales with distance, and is simply drawn after the floor
+// pass each frame — the floor repaint IS the erase.
 class SnesMode : public ViewMode {
  public:
   const char *name() const override { return "snes"; }

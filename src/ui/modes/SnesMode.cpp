@@ -31,6 +31,55 @@ inline uint16_t unswap(uint16_t c) { return (c >> 8) | (c << 8); }
 // across the bottom row, so the cover stays recognisable.
 inline int32_t depthFor(int i) { return (96 * FP) / (i + 6); }
 
+// The racer. Hand-built from primitives at a depth-driven scale: a wedge
+// body, canopy, rear wing, and a jet flame that flickers on the clock. The
+// shadow is what seats it ON the plane — without it the car reads as
+// floating in front of the screen rather than driving on the floor.
+void drawRacer(float clock, float dimf) {
+  // Smooth wander: two incommensurate sines each for x and depth.
+  const float wx = std::sin(clock * 0.61f) * 0.7f + std::sin(clock * 1.53f) * 0.3f;
+  const float wd = std::sin(clock * 0.37f + 2.0f) * 0.5f +
+                   std::sin(clock * 0.91f) * 0.2f;
+
+  const int row = 72 + static_cast<int>(wd * 26.0f);        // floor row 39..97
+  const float s = 0.55f + (row - 40) / 60.0f * 0.75f;       // depth scale
+  const int cx = 160 + static_cast<int>(wx * (60.0f + 40.0f * s));
+  const int cy = HORIZON + 1 + row;
+
+  auto C = [dimf](uint32_t rgb) {
+    return M5.Display.color565(
+        static_cast<uint8_t>(((rgb >> 16) & 0xFF) * dimf),
+        static_cast<uint8_t>(((rgb >> 8) & 0xFF) * dimf),
+        static_cast<uint8_t>((rgb & 0xFF) * dimf));
+  };
+  auto px = [s](float v) { return static_cast<int>(v * s + 0.5f); };
+
+  // Shadow, slightly ahead of the body the way a low sun would put it.
+  M5.Display.fillEllipse(cx, cy + px(3), px(16), px(4), C(0x060810));
+
+  // Rear wing.
+  M5.Display.fillRect(cx - px(15), cy - px(6), px(30), px(3), C(0x8890A0));
+  M5.Display.fillRect(cx - px(15), cy - px(9), px(4), px(6), C(0x606878));
+  M5.Display.fillRect(cx + px(11), cy - px(9), px(4), px(6), C(0x606878));
+
+  // Body: blue wedge, nose toward the viewer.
+  M5.Display.fillTriangle(cx - px(11), cy - px(5), cx + px(11), cy - px(5),
+                          cx, cy + px(9), C(0x2A5ADF));
+  M5.Display.fillRect(cx - px(11), cy - px(6), px(22), px(4), C(0x3A6AEF));
+  // Nose stripe and canopy.
+  M5.Display.fillTriangle(cx - px(3), cy - px(2), cx + px(3), cy - px(2), cx,
+                          cy + px(7), C(0xE8B020));
+  M5.Display.fillEllipse(cx, cy - px(3), px(4), px(2), C(0xB8E8FF));
+
+  // Jet flame, flickering: two frames on the clock, hidden at tiny scale.
+  if (s > 0.6f) {
+    const bool flick = (static_cast<int>(clock * 14.0f) & 1) != 0;
+    const uint32_t flame = flick ? 0xFFB030 : 0xFF6820;
+    M5.Display.fillRect(cx - px(6), cy - px(9), px(4), px(2), C(flame));
+    M5.Display.fillRect(cx + px(2), cy - px(9), px(4), px(2), C(flame));
+  }
+}
+
 }  // namespace
 
 void SnesMode::release() {
@@ -210,5 +259,11 @@ void SnesMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) {
     }
     line_->pushSprite(0, HORIZON + 1 + i);
   }
+
+  // The racer, after the floor: the full floor repaint above is its eraser.
+  // Pausing freezes the clock, which freezes both the plane and the car, and
+  // the unchanged-scroll early-out above keeps the frozen frame intact.
+  drawRacer(clock_ * 0.12f, dimf);
+
   M5.Display.endWrite();
 }
