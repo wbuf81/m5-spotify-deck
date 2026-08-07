@@ -10,14 +10,22 @@ There is a Bernese Mountain Dog in it. Her name is Daisy. She naps when
 nothing is playing, gets the zoomies when the volume is high, and runs a
 victory lap across the screen when you like a song.
 
+![snes mode 7](docs/screenshots/snes.gif)
+
 | | |
 |---|---|
-| ![now playing](docs/screenshots/now-playing.png) | ![snes](docs/screenshots/snes.png) |
-| Classic view | SNES: the cover as a Mode 7 plane |
-| ![gameboy](docs/screenshots/gameboy.png) | ![nes](docs/screenshots/nes.png) |
-| Game Boy: each song is a cartridge | NES: the HUD, in the real 2C02 palette |
-| ![daisy](docs/screenshots/daisy.png) | ![nothing playing](docs/screenshots/nothing-playing.png) |
-| Daisy's room | Nothing playing |
+| ![gameboy](docs/screenshots/gameboy.gif) | ![nes](docs/screenshots/nes.gif) |
+| Game Boy: DMG boot, four greens, ordered dither | NES: the HUD in the real 2C02 palette, Tetris in the margins |
+| ![daisy](docs/screenshots/daisy.gif) | ![classic](docs/screenshots/classic-like.gif) |
+| Daisy's room (wait for the ball) | Classic — like a song and she does a lap |
+| ![synthwave](docs/screenshots/synthwave.gif) | ![pixel](docs/screenshots/pixel.gif) |
+| Synthwave: sinking sun, shooting stars | Pixel: CRT shimmer over the cover |
+| ![cyberdeck](docs/screenshots/cyberdeck.gif) | ![nothing playing](docs/screenshots/nothing-playing.png) |
+| Cyberdeck: live event log | Nothing playing |
+
+*(Every frame above is the actual firmware rendering — captured from the
+emulator, which runs the same source as the device. `tools/make_gifs.py`
+regenerates them.)*
 
 ## What it does
 
@@ -178,6 +186,7 @@ built on:
 | `EMU_PORTAL=1` | Preview the setup-portal screen |
 | `EMU_DIM_AFTER_MS` / `EMU_SLEEP_AFTER_MS` | Shorten the dim/sleep timers |
 | `EMU_DUMP=<path>` | Write the framebuffer as a 24-bit BMP |
+| `EMU_DUMP_EVERY_MS` + `EMU_DUMP_COUNT` | Dump a numbered frame sequence from one run (feeds `tools/make_gifs.py`) |
 | `EMU_EXIT_MS=<ms>` | Quit after wall-clock ms |
 | `SPOTIFY_DEBUG=1` / `SPOTIFY_DIAG=1` | HTTP logging / one-shot endpoint probe (never tokens) |
 

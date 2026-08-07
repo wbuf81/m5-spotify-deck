@@ -101,6 +101,29 @@ bool confirmedPlaying(const AppState &st) {
 }
 
 #if defined(EMULATOR)
+// EMU_DUMP_EVERY_MS + EMU_DUMP_COUNT: dump a numbered frame sequence from ONE
+// run — <EMU_DUMP>000.bmp, 001.bmp, ... — then exit. One process means the
+// animation clocks are coherent across frames, which stitching single-frame
+// runs together only approximates. This is how the README's GIFs are made.
+void emuSequenceTick(uint32_t now) {
+  const char *every_s = std::getenv("EMU_DUMP_EVERY_MS");
+  const char *prefix = std::getenv("EMU_DUMP");
+  if (!every_s || !prefix) return;
+  const uint32_t every = static_cast<uint32_t>(std::atoi(every_s));
+  const int count = std::getenv("EMU_DUMP_COUNT")
+                        ? std::atoi(std::getenv("EMU_DUMP_COUNT"))
+                        : 16;
+  static uint32_t next_ms = 0;
+  static int n = 0;
+  if (next_ms == 0) next_ms = now;  // first frame immediately
+  if (now < next_ms || n >= count) return;
+  char path[256];
+  std::snprintf(path, sizeof(path), "%s%03d.bmp", prefix, n);
+  dumpFrameBmp(path);
+  next_ms += every;
+  if (++n >= count) std::exit(0);
+}
+
 // Two exit hooks. EMU_EXIT_MS is wall-clock and is the one to use when
 // waiting on the network: loop() runs as fast as SDL allows, so a frame count
 // can elapse in well under a second and kill the process mid-request.
@@ -416,6 +439,7 @@ void loop(void) {
   // Portal preview holds the setup screen exactly as setup() drew it; only
   // the exit hooks run so the visual suite can dump it.
   if (g_portal_preview) {
+    emuSequenceTick(now);
     emuExitTick(now);
     return;
   }
@@ -616,6 +640,7 @@ void loop(void) {
     else if (std::strcmp(l, "notrack") == 0) g_state.pb.has_track = false;
   }
 
+  emuSequenceTick(now);
   emuExitTick(now);
 #endif
 }
