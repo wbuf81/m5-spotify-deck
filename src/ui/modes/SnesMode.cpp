@@ -33,19 +33,36 @@ inline int32_t depthFor(int i) { return (96 * FP) / (i + 6); }
 
 // The racer. Hand-built from primitives at a depth-driven scale: a wedge
 // body, canopy, rear wing, and a jet flame that flickers on the clock. The
-// shadow is what seats it ON the plane — without it the car reads as
-// floating in front of the screen rather than driving on the floor.
-void drawRacer(float clock, float dimf) {
+// shadow is what seats it ON the plane.
+//
+// It renders into a small keyed sprite, and the floor pass composites the
+// sprite's rows into each scanline before pushing. The first version drew it
+// AFTER the 127 row blits, which meant the car was absent from the panel for
+// most of every frame — visible as constant blinking.
+constexpr int CAR_W = 48, CAR_H = 34;
+constexpr int CAR_OX = CAR_W / 2;   // sprite coords of the car's anchor
+constexpr int CAR_OY = 18;
+constexpr uint16_t CAR_KEY = 0xF81F;  // magenta: never produced by the art
+
+struct RacerPose {
+  int cx, cy;   // anchor on screen
+  float s;      // depth scale
+};
+
+RacerPose racerPose(float clock) {
   // Smooth wander: two incommensurate sines each for x and depth.
   const float wx = std::sin(clock * 0.61f) * 0.7f + std::sin(clock * 1.53f) * 0.3f;
   const float wd = std::sin(clock * 0.37f + 2.0f) * 0.5f +
                    std::sin(clock * 0.91f) * 0.2f;
+  RacerPose p;
+  const int row = 72 + static_cast<int>(wd * 26.0f);   // floor row 39..97
+  p.s = 0.55f + (row - 40) / 60.0f * 0.75f;
+  p.cx = 160 + static_cast<int>(wx * (60.0f + 40.0f * p.s));
+  p.cy = HORIZON + 1 + row;
+  return p;
+}
 
-  const int row = 72 + static_cast<int>(wd * 26.0f);        // floor row 39..97
-  const float s = 0.55f + (row - 40) / 60.0f * 0.75f;       // depth scale
-  const int cx = 160 + static_cast<int>(wx * (60.0f + 40.0f * s));
-  const int cy = HORIZON + 1 + row;
-
+void renderRacerSprite(M5Canvas *cv, float s, float clock, float dimf) {
   auto C = [dimf](uint32_t rgb) {
     return M5.Display.color565(
         static_cast<uint8_t>(((rgb >> 16) & 0xFF) * dimf),
@@ -53,30 +70,33 @@ void drawRacer(float clock, float dimf) {
         static_cast<uint8_t>((rgb & 0xFF) * dimf));
   };
   auto px = [s](float v) { return static_cast<int>(v * s + 0.5f); };
+  const int cx = CAR_OX, cy = CAR_OY;
+
+  cv->fillSprite(CAR_KEY);
 
   // Shadow, slightly ahead of the body the way a low sun would put it.
-  M5.Display.fillEllipse(cx, cy + px(3), px(16), px(4), C(0x060810));
+  cv->fillEllipse(cx, cy + px(3), px(16), px(4), C(0x060810));
 
   // Rear wing.
-  M5.Display.fillRect(cx - px(15), cy - px(6), px(30), px(3), C(0x8890A0));
-  M5.Display.fillRect(cx - px(15), cy - px(9), px(4), px(6), C(0x606878));
-  M5.Display.fillRect(cx + px(11), cy - px(9), px(4), px(6), C(0x606878));
+  cv->fillRect(cx - px(15), cy - px(6), px(30), px(3), C(0x8890A0));
+  cv->fillRect(cx - px(15), cy - px(9), px(4), px(6), C(0x606878));
+  cv->fillRect(cx + px(11), cy - px(9), px(4), px(6), C(0x606878));
 
   // Body: blue wedge, nose toward the viewer.
-  M5.Display.fillTriangle(cx - px(11), cy - px(5), cx + px(11), cy - px(5),
-                          cx, cy + px(9), C(0x2A5ADF));
-  M5.Display.fillRect(cx - px(11), cy - px(6), px(22), px(4), C(0x3A6AEF));
+  cv->fillTriangle(cx - px(11), cy - px(5), cx + px(11), cy - px(5), cx,
+                   cy + px(9), C(0x2A5ADF));
+  cv->fillRect(cx - px(11), cy - px(6), px(22), px(4), C(0x3A6AEF));
   // Nose stripe and canopy.
-  M5.Display.fillTriangle(cx - px(3), cy - px(2), cx + px(3), cy - px(2), cx,
-                          cy + px(7), C(0xE8B020));
-  M5.Display.fillEllipse(cx, cy - px(3), px(4), px(2), C(0xB8E8FF));
+  cv->fillTriangle(cx - px(3), cy - px(2), cx + px(3), cy - px(2), cx,
+                   cy + px(7), C(0xE8B020));
+  cv->fillEllipse(cx, cy - px(3), px(4), px(2), C(0xB8E8FF));
 
   // Jet flame, flickering: two frames on the clock, hidden at tiny scale.
   if (s > 0.6f) {
     const bool flick = (static_cast<int>(clock * 14.0f) & 1) != 0;
     const uint32_t flame = flick ? 0xFFB030 : 0xFF6820;
-    M5.Display.fillRect(cx - px(6), cy - px(9), px(4), px(2), C(flame));
-    M5.Display.fillRect(cx + px(2), cy - px(9), px(4), px(2), C(flame));
+    cv->fillRect(cx - px(6), cy - px(9), px(4), px(2), C(flame));
+    cv->fillRect(cx + px(2), cy - px(9), px(4), px(2), C(flame));
   }
 }
 
@@ -92,6 +112,11 @@ void SnesMode::release() {
     line_->deleteSprite();
     delete line_;
     line_ = nullptr;
+  }
+  if (car_) {
+    car_->deleteSprite();
+    delete car_;
+    car_ = nullptr;
   }
 }
 
@@ -182,6 +207,15 @@ void SnesMode::enter(const AppState &st, const ViewCtx &ctx) {
       line_ = nullptr;
     }
   }
+  if (!car_) {
+    car_ = new M5Canvas(&M5.Display);
+    car_->setColorDepth(16);
+    if (!car_->createSprite(CAR_W, CAR_H)) {
+      NETLOG("snes: car sprite FAILED");
+      delete car_;
+      car_ = nullptr;
+    }
+  }
 
   last_ms_ = 0;
   last_v0_ = -1;  // force the first floor pass
@@ -209,6 +243,20 @@ void SnesMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) {
   uint16_t *row = static_cast<uint16_t *>(line_->getBuffer());
   const uint16_t sky = pal.bg;
   const float dimf = theme::dimFactor();
+
+  // The racer, rendered into its keyed sprite BEFORE the floor pass so each
+  // scanline can composite it in. Key compare happens in buffer domain, so
+  // the key constant is pre-swapped like the pixels are.
+  const RacerPose pose = racerPose(clock_ * 0.12f);
+  const uint16_t *carbuf = nullptr;
+  int car_x0 = 0, car_y0 = 0;
+  if (car_) {
+    renderRacerSprite(car_, pose.s, clock_ * 0.12f, dimf);
+    carbuf = static_cast<const uint16_t *>(car_->getBuffer());
+    car_x0 = pose.cx - CAR_OX;
+    car_y0 = pose.cy - CAR_OY;
+  }
+  const uint16_t key_raw = static_cast<uint16_t>((CAR_KEY >> 8) | (CAR_KEY << 8));
 
   M5.Display.startWrite();
   for (int i = 0; i < FLOOR_H; ++i) {
@@ -257,13 +305,22 @@ void SnesMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) {
       }
       u += z;
     }
+
+    // Composite the racer's slice of this scanline.
+    if (carbuf) {
+      const int sy = (HORIZON + 1 + i) - car_y0;
+      if (sy >= 0 && sy < CAR_H) {
+        const uint16_t *crow = carbuf + sy * CAR_W;
+        for (int cxp = 0; cxp < CAR_W; ++cxp) {
+          const int dx = car_x0 + cxp;
+          if (dx < 0 || dx >= SCREEN_W) continue;
+          const uint16_t c = crow[cxp];
+          if (c != key_raw) row[dx] = c;
+        }
+      }
+    }
+
     line_->pushSprite(0, HORIZON + 1 + i);
   }
-
-  // The racer, after the floor: the full floor repaint above is its eraser.
-  // Pausing freezes the clock, which freezes both the plane and the car, and
-  // the unchanged-scroll early-out above keeps the frozen frame intact.
-  drawRacer(clock_ * 0.12f, dimf);
-
   M5.Display.endWrite();
 }

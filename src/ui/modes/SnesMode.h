@@ -27,6 +27,7 @@ class SnesMode : public ViewMode {
   M5Canvas *tex_ = nullptr;   // 64x64 cover texture, sampled per pixel
   uint16_t mip_[16 * 16] = {};  // box-filtered mip for the far rows
   M5Canvas *line_ = nullptr;  // one 320px scanline, pushed per row
+  M5Canvas *car_ = nullptr;   // the racer, keyed, composited per scanline
   float clock_ = 0.0f;
   uint32_t last_ms_ = 0;
   int32_t last_v0_ = -1;  // quantised scroll; unchanged plane skips the redraw
