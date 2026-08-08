@@ -11,6 +11,7 @@
 // Values are never logged. Saving writes only the fields the form filled in,
 // so re-running the portal to change WiFi does not wipe the Spotify token.
 
+#include <cstdint>
 #include <string>
 
 struct DeviceConfig {
