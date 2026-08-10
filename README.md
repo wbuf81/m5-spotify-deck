@@ -27,6 +27,18 @@ victory lap across the screen when you like a song.
 emulator, which runs the same source as the device. `tools/make_gifs.py`
 regenerates them.)*
 
+## If you are coming back to this
+
+- **[docs/RESTORING_THIS_FIRMWARE.md](docs/RESTORING_THIS_FIRMWARE.md)** — put
+  this app back on the board. One command in the usual case, because the WiFi
+  and Spotify config lives in NVS and survives a reflash.
+- **[docs/M5_BASIC_REFERENCE.md](docs/M5_BASIC_REFERENCE.md)** — everything a
+  *different* project needs for this board: toolchain, flashing, serial, the
+  real memory limits, how to get data onto the device at runtime, and every
+  trap this one hit. Written to be copied into another repo as-is.
+- **[docs/ADDING_A_VIEW.md](docs/ADDING_A_VIEW.md)** — adding another view to
+  this app.
+
 ## What it does
 
 - **Eight views**, rotating per track (or pinned): classic, pixel-art,
