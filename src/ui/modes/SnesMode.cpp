@@ -27,9 +27,51 @@ inline uint16_t unswap(uint16_t c) { return (c >> 8) | (c << 8); }
 
 // Perspective: depth for floor row i (0 = just under the horizon). The +6
 // keeps the nearest rows from magnifying single texels into 40px blocks, and
-// the 96 sets the camera height — high enough that three-plus tiles fit
-// across the bottom row, so the cover stays recognisable.
+// the 96 sets the camera height.
 inline int32_t depthFor(int i) { return (96 * FP) / (i + 6); }
+
+// How much the cover is magnified on the plane.
+//
+// At 1 the bottom row fits about 3.6 tiles, and at that size nobody could tell
+// which album they were looking at — the whole point of putting the cover on
+// the floor was lost. At 2 it fits about 1.8, the near rows show real detail,
+// and the nearest texel is about 2.8 pixels across. That is chunky, and it is
+// meant to be: this is the look the view is copying.
+//
+// It divides the texel step rather than scaling the texture, so it costs
+// nothing per pixel and needs no extra memory.
+constexpr int32_t TEX_SCALE = 2;
+
+// How fast the plane recedes. This is the number that decides whether anyone
+// can tell which album is on the floor, and it is not the tile size.
+//
+// The anisotropy at floor row i is DEPTH_K / (i + 6). At the old value of 24 the
+// bottom row came out at 0.18: a texel was 2.8 pixels wide and 15 pixels deep,
+// so every cover was smeared into vertical streaks and doubling the tile size
+// only made the streaks wider. At 132 the bottom row is 1.0, the texels are
+// square there, and the picture appears.
+//
+// The cost is at the other end. Anisotropy at the horizon row is DEPTH_K / 6, so
+// raising it compresses the far field hard and the band under the horizon gets
+// busy. That band is already fogged and already samples the 16x16 mip, which is
+// what keeps it from turning into pure noise.
+constexpr int32_t DEPTH_K = 132;
+
+// The scroll offset advances by this much per unit of clock, and wraps here.
+//
+// Both must exist. The rate carries the scroll into the same texel space the
+// sampler uses, so the plane keeps the speed it always had: TEX_SCALE makes
+// each texel twice as wide, DEPTH_K makes it far shorter in depth, and the two
+// corrections together cancel out on screen.
+//
+// The wrap is the load-bearing one. The offset used to be derived from a clock
+// that runs for as long as playback does, and clock * 8192 crosses INT32_MAX
+// after about 70 minutes — signed overflow, and the floor jumps. Scaling it for
+// DEPTH_K would have brought that down to about 26 minutes, which anyone
+// listening to an album would hit. Wrapping at exactly one texture is invisible
+// because the plane tiles, and it keeps the arithmetic in range forever.
+constexpr float V_PER_CLOCK = (FP / 8.0f) * DEPTH_K / 24.0f / TEX_SCALE;
+constexpr float V_SPAN = static_cast<float>(TEX) * FP;  // one full texture
 
 // The racer. Hand-built from primitives at a depth-driven scale: a wedge
 // body, canopy, rear wing, and a jet flame that flickers on the clock. The
@@ -233,11 +275,14 @@ void SnesMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) {
   // because the clock stops, and the unchanged-scroll check below then skips
   // the whole pass.
   const float vol = st.pb.volume_pct < 0 ? 0.7f : st.pb.volume_pct / 100.0f;
-  if (st.pb.is_playing) clock_ += dt * (18.0f + 46.0f * vol);
+  const float dclock = st.pb.is_playing ? dt * (18.0f + 46.0f * vol) : 0.0f;
+  clock_ += dclock;
+  scroll_ += dclock * V_PER_CLOCK;
+  while (scroll_ >= V_SPAN) scroll_ -= V_SPAN;
 
-  const int32_t v0 = static_cast<int32_t>(clock_ * FP / 8);
-  if (v0 == last_v0_) return;
-  last_v0_ = v0;
+  const int32_t v0s = static_cast<int32_t>(scroll_);
+  if (v0s == last_v0_) return;
+  last_v0_ = v0s;
 
   const uint16_t *texbuf = static_cast<const uint16_t *>(tex_->getBuffer());
   uint16_t *row = static_cast<uint16_t *>(line_->getBuffer());
@@ -266,21 +311,27 @@ void SnesMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) {
     // games hid the horizon and free antialiasing here.
     const int fog = i < 34 ? (255 * (34 - i)) / 34 : 0;  // 0..255
 
+    // Texels crossed per screen pixel. Everything below steps in zs, not z,
+    // which is the whole of the magnification.
+    const int32_t zs = z / TEX_SCALE;
+
     // Far field samples the mip: past this depth adjacent pixels step several
-    // texels apart and full-res sampling is shimmer, not detail.
-    const bool far_field = z > (3 * FP) / 2;
+    // texels apart and full-res sampling is shimmer, not detail. Testing zs
+    // rather than z moves the switch further away on its own — magnified texels
+    // stay clean for more rows, so more of the floor shows the real cover.
+    const bool far_field = zs > (3 * FP) / 2;
     const int shift = far_field ? 2 : 0;      // 64 -> 16 texel space
     const int mask = far_field ? 15 : TEX - 1;
     const uint16_t *texrow;
     if (far_field) {
-      const int32_t v = (((v0 + z * 24) >> 16) >> shift) & mask;
+      const int32_t v = (((v0s + zs * DEPTH_K) >> 16) >> shift) & mask;
       texrow = mip_ + v * 16;
     } else {
-      const int32_t v = ((v0 + z * 24) >> 16) & mask;
+      const int32_t v = ((v0s + zs * DEPTH_K) >> 16) & mask;
       texrow = texbuf + v * TEX;
     }
 
-    int32_t u = -160 * z;              // texture u at x=0, fixed point
+    int32_t u = -160 * zs;             // texture u at x=0, fixed point
     for (int x = 0; x < SCREEN_W; ++x) {
       const uint16_t c = texrow[((u >> 16) >> shift) & mask];
       if (fog == 0 && dimf >= 0.999f) {
@@ -303,7 +354,7 @@ void SnesMode::tick(const AppState &st, const ViewCtx &ctx, uint32_t now_ms) {
         }
         row[x] = unswap(static_cast<uint16_t>((r << 11) | (g << 5) | b));
       }
-      u += z;
+      u += zs;
     }
 
     // Composite the racer's slice of this scanline.

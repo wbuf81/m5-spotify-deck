@@ -29,6 +29,9 @@ class SnesMode : public ViewMode {
   M5Canvas *line_ = nullptr;  // one 320px scanline, pushed per row
   M5Canvas *car_ = nullptr;   // the racer, keyed, composited per scanline
   float clock_ = 0.0f;
+  // Scroll position, kept separate from clock_ and wrapped to one texture.
+  // clock_ also drives the racer's wander, so it must run free; this cannot.
+  float scroll_ = 0.0f;
   uint32_t last_ms_ = 0;
   int32_t last_v0_ = -1;  // quantised scroll; unchanged plane skips the redraw
 };
