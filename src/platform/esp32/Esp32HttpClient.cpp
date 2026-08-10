@@ -14,6 +14,7 @@
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <esp_heap_caps.h>
 
 #include <cstdio>
 #include <cstring>
@@ -36,13 +37,49 @@ WiFiClientSecure *makeClient() {
   return c;
 }
 
-// One session per host, deliberately.
+// Exactly ONE TLS session exists on this device, and it belongs to the API.
 //
-// Sharing a single client between api.spotify.com and i.scdn.co meant every
-// artwork download tore down the API connection, so the next poll paid a full
-// TLS handshake. Measured on hardware: /me/player was costing ~900ms where
-// session reuse should make it a quarter of that.
+// Artwork used to have its own. It cannot: an established mbedTLS session
+// allocates a ~16.7KB input buffer and a ~16.7KB output buffer, each of which
+// must be CONTIGUOUS, and this board simply does not keep a 34KB run of heap
+// free once WiFi, the view sprites and the JPEG decoder have taken their share.
+//
+// The measurements, all taken mid-failure on hardware:
+//
+//   free 81712, largest block 19444  -> handshake fails, two sessions live
+//   free 122348, largest block 32756 -> handshake STILL fails, one session live
+//
+// That second line is the important one. Dropping the API session first was not
+// enough: 32756 fits the first 16.7KB buffer and leaves ~16KB, just short of the
+// second. The requirement sits right on the boundary, so it failed whenever the
+// active view happened to hold one sprite too many — which is why the cover came
+// and went with no pattern anyone could see from the outside.
+//
+// So artwork is fetched over plain HTTP and needs no session at all. The bytes
+// are public cover images; nothing here is secret, no token or client secret
+// goes near the CDN, and the API keeps full certificate validation. The upside
+// beyond reliability is speed: a download that cost 1.3-4.5s of handshake is now
+// a few hundred milliseconds.
+//
+// The HTTPClient and its client are owned as a PAIR, and both are heap-allocated
+// so a reset can destroy them in the right order.
+//
+// HTTPClient keeps a raw _client pointer and never clears it — not in end(),
+// not in disconnect(). Deleting the WiFiClientSecure underneath a surviving
+// HTTPClient therefore leaves that pointer dangling, and the next request
+// crashes inside HTTPClient::connected() (LoadProhibited, EXCVADDR 0x18) called
+// from setTimeout(), which runs BEFORE begin() gets a chance to rebind it. The
+// crash lands a poll later than the mistake, in code that looks innocent.
+//
+// This was already latent on the transport-error path; making the artwork
+// download reset the API session turned "rare" into "every album change".
+HTTPClient *g_api_http = nullptr;
 WiFiClientSecure *g_api = nullptr;
+
+HTTPClient &apiHttp() {
+  if (!g_api_http) g_api_http = new HTTPClient();
+  return *g_api_http;
+}
 
 WiFiClientSecure &apiClient() {
   if (!g_api) g_api = makeClient();
@@ -58,8 +95,14 @@ WiFiClientSecure &apiClient() {
 // went offline at 69s and never came back, with plenty of free heap. Calling
 // stop() releases the socket and the mbedTLS context; the client is rebuilt
 // lazily on the next call.
-void resetApiSession(HTTPClient *http) {
-  http->end();
+// Order is load-bearing: the HTTPClient goes first, while the client it points
+// at is still alive, because end() and ~HTTPClient() both dereference it.
+void resetApiSession() {
+  if (g_api_http) {
+    g_api_http->end();
+    delete g_api_http;
+    g_api_http = nullptr;
+  }
   if (g_api) {
     g_api->stop();
     delete g_api;
@@ -67,10 +110,18 @@ void resetApiSession(HTTPClient *http) {
   }
 }
 
-WiFiClientSecure *g_cdn = nullptr;
+// Plain WiFiClient, not WiFiClientSecure: see the note above. A few hundred
+// bytes instead of ~35KB, and no contiguous-allocation cliff to fall off.
+HTTPClient *g_cdn_http = nullptr;
+WiFiClient *g_cdn = nullptr;
 
-WiFiClientSecure &cdnClient() {
-  if (!g_cdn) g_cdn = makeClient();
+HTTPClient &cdnHttp() {
+  if (!g_cdn_http) g_cdn_http = new HTTPClient();
+  return *g_cdn_http;
+}
+
+WiFiClient &cdnClient() {
+  if (!g_cdn) g_cdn = new WiFiClient();
   return *g_cdn;
 }
 
@@ -78,8 +129,12 @@ WiFiClientSecure &cdnClient() {
 // exposed to it than the API one: album changes are typically minutes apart,
 // far past the ~60s idle close, so nearly every download after the first would
 // have found a dead socket.
-void resetCdnSession(HTTPClient *http) {
-  http->end();
+void resetCdnSession() {
+  if (g_cdn_http) {
+    g_cdn_http->end();
+    delete g_cdn_http;
+    g_cdn_http = nullptr;
+  }
   if (g_cdn) {
     g_cdn->stop();
     delete g_cdn;
@@ -126,7 +181,7 @@ bool requestOnce(const char *method, const std::string &url,
   // so constructing one per call threw the connection away every time and paid
   // a full TLS handshake. Measured: /me/player cost ~930ms on every poll, two
   // seconds apart, which is a handshake rather than a request.
-  static HTTPClient http;
+  HTTPClient &http = apiHttp();
   http.setReuse(true);
   // Bounded so one bad connection cannot wedge the net task for half a minute.
   http.setConnectTimeout(5000);
@@ -177,7 +232,7 @@ bool requestOnce(const char *method, const std::string &url,
     // every time.
     NETLOG("%s %s failed: %s — resetting session", method, url.c_str(),
            HTTPClient::errorToString(code).c_str());
-    resetApiSession(&http);
+    resetApiSession();
     if (attempt == 0) return false;  // caller retries on a fresh connection
     return false;
   }
@@ -229,8 +284,8 @@ bool downloadToFile(const std::string &url, const std::string &path) {
   // Separate instance: mixing the CDN into the API's client would evict its
   // keep-alive on every album change.
   // Open the destination BEFORE fetching. The first version did the GET first,
-  // so with unusable storage it downloaded ~30KB over TLS every poll and threw
-  // it away — a permanent request storm against Spotify's CDN.
+  // so with unusable storage it downloaded ~30KB every poll and threw it away —
+  // a permanent request storm against Spotify's CDN.
   const std::string tmp = path + ".part";
   FILE *f = std::fopen(tmp.c_str(), "wb");
   if (!f) {
@@ -238,39 +293,58 @@ bool downloadToFile(const std::string &url, const std::string &path) {
     return false;
   }
 
-  NETLOG("artwork GET %s", url.c_str());
+  // Spotify hands out https:// image URLs; fetch them over http:// instead.
+  // The CDN serves the same bytes either way — verified: 200 with a correct
+  // Content-Length and no redirect — and this is the whole point of the note
+  // above, so do not quietly "fix" it back to https.
+  std::string plain = url;
+  if (plain.compare(0, 8, "https://") == 0) plain.erase(4, 1);  // https -> http
 
-  static HTTPClient http;
-  http.setReuse(true);  // its own session, so keeping it alive is free
-  http.setConnectTimeout(5000);
-  http.setTimeout(10000);
-  if (!http.begin(cdnClient(), url.c_str())) {
+  NETLOG("artwork GET %s", plain.c_str());
+  NETLOG("  heap: free %lu, largest block %lu",
+         (unsigned long)ESP.getFreeHeap(),
+         (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+  // Re-fetched through cdnHttp() after every reset, never held across one: a
+  // reset destroys the HTTPClient along with its client, so a reference taken
+  // beforehand would be dangling.
+  auto configure = [](HTTPClient &c) {
+    c.setReuse(true);
+    c.setConnectTimeout(5000);
+    c.setTimeout(10000);
+  };
+
+  configure(cdnHttp());
+  if (!cdnHttp().begin(cdnClient(), plain.c_str())) {
+    NETLOG("artwork begin() refused the url");
     std::fclose(f);
     std::remove(tmp.c_str());
+    resetCdnSession();
     return false;
   }
 
-  int code = http.GET();
+  int code = cdnHttp().GET();
   if (code < 0) {
     // Reused connection lost the race with the server's idle close. Rebuild
     // the session and try once more before reporting failure — otherwise this
     // album gets marked failed and never shows its cover.
     NETLOG("artwork GET failed (%s) — retrying on a fresh session",
            HTTPClient::errorToString(code).c_str());
-    resetCdnSession(&http);
-    if (!http.begin(cdnClient(), url.c_str())) {
+    resetCdnSession();
+    configure(cdnHttp());
+    if (!cdnHttp().begin(cdnClient(), plain.c_str())) {
       std::fclose(f);
       std::remove(tmp.c_str());
+      resetCdnSession();
       return false;
     }
-    code = http.GET();
+    code = cdnHttp().GET();
   }
   if (code != HTTP_CODE_OK) {
     NETLOG("artwork GET -> %d", code);
-    if (code < 0) resetCdnSession(&http);
     std::fclose(f);
     std::remove(tmp.c_str());
-    http.end();
+    resetCdnSession();
     return false;
   }
 
@@ -287,9 +361,13 @@ bool downloadToFile(const std::string &url, const std::string &path) {
   // The connected() test alone is not enough either. On a chunked response
   // getSize() is -1, and keep-alive holds the socket open after the final
   // chunk, so connected() stays true with nothing left to read.
+  // Safe to bind now: no reset happens between here and the end of the loop.
+  HTTPClient &http = cdnHttp();
   WiFiClient *stream = http.getStreamPtr();
   uint8_t buf[1024];
-  int remaining = http.getSize();
+  const int declared = http.getSize();
+  int remaining = declared;
+  int written = 0;
   bool ok = true;
 
   Deadline no_progress, overall;
@@ -318,24 +396,44 @@ bool downloadToFile(const std::string &url, const std::string &path) {
       continue;
     }
     const int n = stream->readBytes(buf, avail > sizeof(buf) ? sizeof(buf) : avail);
-    if (n <= 0) break;
+    if (n <= 0) {
+      NETLOG("artwork read returned %d with %d left — stopping", n, remaining);
+      break;
+    }
     if (std::fwrite(buf, 1, n, f) != static_cast<size_t>(n)) {
+      NETLOG("artwork write to sd failed after %d bytes", written);
       ok = false;
       break;
     }
+    written += n;
     if (remaining > 0) remaining -= n;
     no_progress.arm(millis(), DL_STALL_MS);  // progress resets the stall clock
   }
 
   std::fclose(f);
-  http.end();
+
+  // Close it rather than holding it until the next album. Album changes are
+  // minutes apart, far past the CDN's ~60s idle close, so a held socket would be
+  // dead on arrival and the next download would spend its first attempt finding
+  // that out. Costs nothing to rebuild now that there is no handshake.
+  resetCdnSession();
 
   // Promote only on success, so a truncated download never becomes a cache
   // entry that fails to decode later.
+  //
+  // Every exit below says why it failed. An earlier version returned false from
+  // three of these paths in silence, so "artwork unavailable" was the only trace
+  // in the log and it named no cause at all.
   if (ok && remaining <= 0) {
     std::remove(path.c_str());
-    return std::rename(tmp.c_str(), path.c_str()) == 0;
+    if (std::rename(tmp.c_str(), path.c_str()) == 0) return true;
+    NETLOG("artwork rename to %s failed after %d bytes", path.c_str(), written);
+    std::remove(tmp.c_str());
+    return false;
   }
+
+  NETLOG("artwork incomplete: %d of %d bytes, %d left, ok=%d", written, declared,
+         remaining, ok ? 1 : 0);
   std::remove(tmp.c_str());
   return false;
 }

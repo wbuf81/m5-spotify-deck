@@ -23,6 +23,13 @@ class ArtCache {
   // poll path can use it without paying for a download.
   std::string cachedPath(const std::string &album_id) const;
 
+  // True once this album's cover has failed and will not be retried until the
+  // album changes. The poll path has to ask, because otherwise it re-queues the
+  // same download every two seconds: ensure() refuses it instantly, art_loading
+  // goes true then false, and the screen strobes between the "fetching cover"
+  // placeholder and "no artwork" instead of settling on the honest one.
+  bool failed(const std::string &album_id) const;
+
  private:
   std::string dir_;
 

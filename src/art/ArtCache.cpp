@@ -105,6 +105,10 @@ std::string ArtCache::cachedPath(const std::string &album_id) const {
   return fileExists(path) ? path : "";
 }
 
+bool ArtCache::failed(const std::string &album_id) const {
+  return !album_id.empty() && failed_album_ == album_id;
+}
+
 std::string ArtCache::ensure(const std::string &album_id,
                              const std::string &url) {
   if (!safeId(album_id) || url.empty()) return "";

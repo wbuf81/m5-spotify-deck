@@ -278,6 +278,12 @@ void SpotifySource::pollPlayer(AppState *out, uint32_t now_ms) {
     if (!cached.empty()) {
       setStr(out->pb.art_path, PATH_LEN, cached.c_str());
       out->pb.art_loading = false;
+    } else if (art_.failed(out->pb.album_id)) {
+      // Already tried and refused for this album. Queueing it again would burn
+      // the between-polls slot every two seconds — starving the liked-state
+      // refresh that shares it — and flicker the artwork region while doing it.
+      out->pb.art_path[0] = '\0';
+      out->pb.art_loading = false;
     } else {
       out->pb.art_path[0] = '\0';
       out->pb.art_loading = true;
